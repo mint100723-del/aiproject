@@ -1,291 +1,662 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import numpy as np
 
-# --------------------------------------------------
+# =========================================================
 # 페이지 설정
-# --------------------------------------------------
+# =========================================================
 st.set_page_config(
-    page_title="🌎 국가별 MBTI 탐험",
+    page_title="🌎 국가별 MBTI 분석",
     page_icon="🌎",
     layout="wide"
 )
 
-# --------------------------------------------------
-# 스타일
-# --------------------------------------------------
-st.markdown(
-    """
-    <style>
-    .main-title {
-        font-size: 42px;
-        font-weight: 800;
-        text-align: center;
-        margin-bottom: 5px;
-    }
+# =========================================================
+# CSS
+# =========================================================
+st.markdown("""
+<style>
 
-    .sub-title {
-        font-size: 18px;
-        color: #666666;
-        text-align: center;
-        margin-bottom: 30px;
-    }
+.main-title {
+    font-size: 42px;
+    font-weight: 800;
+    text-align: center;
+    margin-top: 10px;
+    margin-bottom: 5px;
+}
 
-    .info-box {
-        background-color: #f7f7fb;
-        padding: 20px;
-        border-radius: 15px;
-        text-align: center;
-        margin-bottom: 20px;
-    }
+.sub-title {
+    text-align: center;
+    color: #777777;
+    font-size: 18px;
+    margin-bottom: 30px;
+}
 
-    .top-mbti {
-        font-size: 32px;
-        font-weight: 800;
-        color: #ff1493;
-    }
+.section-title {
+    font-size: 25px;
+    font-weight: 800;
+    margin-top: 25px;
+    margin-bottom: 15px;
+}
 
-    .top-percent {
-        font-size: 22px;
-        font-weight: 600;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+.info-box {
+    background: linear-gradient(135deg, #fff0f8, #f3f6ff);
+    border-radius: 20px;
+    padding: 25px;
+    text-align: center;
+    margin: 20px 0 30px 0;
+}
 
-# --------------------------------------------------
+.country-name {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.top-mbti {
+    font-size: 42px;
+    font-weight: 900;
+    color: #ff1493;
+    margin: 5px 0;
+}
+
+.top-percent {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.chart-area {
+    margin-top: 20px;
+    overflow-x: auto;
+}
+
+.vertical-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    height: 420px;
+    padding: 20px 10px 0 10px;
+    border-bottom: 2px solid #d9dce3;
+    min-width: 850px;
+}
+
+.bar-item {
+    flex: 1;
+    min-width: 45px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.bar-value {
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 5px;
+    white-space: nowrap;
+}
+
+.vertical-bar {
+    width: 100%;
+    max-width: 52px;
+    min-height: 4px;
+    border-radius: 8px 8px 0 0;
+}
+
+.bar-label {
+    margin-top: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.rank-label {
+    font-size: 10px;
+    color: #888888;
+    margin-top: 3px;
+}
+
+.country-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 5px;
+    height: 460px;
+    padding: 20px 10px 0 10px;
+    border-bottom: 2px solid #d9dce3;
+    min-width: 1500px;
+}
+
+.country-bar-item {
+    flex: 1;
+    min-width: 45px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.country-bar {
+    width: 100%;
+    max-width: 42px;
+    min-height: 3px;
+    border-radius: 7px 7px 0 0;
+}
+
+.country-label {
+    margin-top: 7px;
+    font-size: 9px;
+    font-weight: 600;
+    text-align: center;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    height: 75px;
+    overflow: hidden;
+}
+
+.country-value {
+    font-size: 9px;
+    font-weight: 700;
+    margin-bottom: 3px;
+    white-space: nowrap;
+}
+
+.tip-box {
+    background: #f7f8fc;
+    border-radius: 14px;
+    padding: 15px;
+    margin-top: 15px;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+
+# =========================================================
 # 데이터 불러오기
-# --------------------------------------------------
+# =========================================================
 @st.cache_data
 def load_data():
-    df = pd.read_csv("countriesMBTI_16types.csv")
-    return df
+    data = pd.read_csv("countriesMBTI_16types.csv")
+
+    # 숫자 데이터 변환
+    for column in data.columns[1:]:
+        data[column] = pd.to_numeric(
+            data[column],
+            errors="coerce"
+        )
+
+    return data
 
 
-df = load_data()
+try:
+    df = load_data()
+except Exception as e:
+    st.error(
+        "❌ CSV 파일을 불러오지 못했어요. "
+        "'countriesMBTI_16types.csv'가 앱과 같은 프로젝트에 있는지 확인해주세요."
+    )
+    st.stop()
 
-# MBTI 16개 유형
-mbti_types = df.columns[1:].tolist()
 
-# --------------------------------------------------
+# =========================================================
+# MBTI 목록
+# =========================================================
+mbti_types = [
+    "INFJ", "ISFJ", "INTP", "ISFP",
+    "ENTP", "INFP", "ENTJ", "ISTP",
+    "INTJ", "ESFP", "ESTJ", "ENFP",
+    "ESTP", "ISTJ", "ENFJ", "ESFJ"
+]
+
+
+# 실제 데이터에 존재하는 MBTI만 사용
+mbti_types = [
+    mbti for mbti in mbti_types
+    if mbti in df.columns
+]
+
+
+# =========================================================
 # 제목
-# --------------------------------------------------
+# =========================================================
 st.markdown(
-    '<div class="main-title">🌎 국가별 MBTI 탐험</div>',
+    '<div class="main-title">🌎 국가별 MBTI 분석</div>',
     unsafe_allow_html=True
 )
 
 st.markdown(
     '<div class="sub-title">'
-    '나라별 MBTI 비율을 한눈에 비교해보세요! ✨'
+    '국가와 MBTI를 자유롭게 선택해서 세계의 MBTI 비율을 살펴보세요! ✨'
     '</div>',
     unsafe_allow_html=True
 )
 
-# --------------------------------------------------
-# 국가 선택
-# --------------------------------------------------
-st.subheader("🌍 국가를 선택해주세요")
 
-selected_country = st.selectbox(
-    "국가",
-    df["Country"].tolist()
-)
+# =========================================================
+# 탭
+# =========================================================
+tab1, tab2 = st.tabs([
+    "🌍 국가 → MBTI",
+    "🧠 MBTI → 국가"
+])
 
-# --------------------------------------------------
-# 선택한 국가 데이터 가져오기
-# --------------------------------------------------
-country_row = df[df["Country"] == selected_country].iloc[0]
 
-mbti_data = country_row[mbti_types].astype(float)
+# =========================================================
+# TAB 1
+# 국가를 선택하면 MBTI 비율
+# =========================================================
+with tab1:
 
-# 높은 비율 순으로 정렬
-mbti_sorted = mbti_data.sort_values(ascending=True)
-
-# 1위 MBTI
-top_mbti = mbti_data.idxmax()
-top_value = mbti_data.max() * 100
-
-# --------------------------------------------------
-# 1위 정보 표시
-# --------------------------------------------------
-st.markdown(
-    f"""
-    <div class="info-box">
-        <div style="font-size:20px;">
-            🇺🇳 <b>{selected_country}</b>의 가장 높은 MBTI
-        </div>
-        <div class="top-mbti">
-            {top_mbti}
-        </div>
-        <div class="top-percent">
-            {top_value:.2f}%
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-# --------------------------------------------------
-# 그래프
-# --------------------------------------------------
-st.subheader("📊 MBTI 비율")
-
-fig, ax = plt.subplots(figsize=(11, 8))
-
-# 값
-values = mbti_sorted.values * 100
-labels = mbti_sorted.index
-
-# --------------------------------------------------
-# 색상 만들기
-# --------------------------------------------------
-# 1위 = 핫핑크
-hot_pink = "#FF1493"
-
-# 나머지 = 남색 계열 그라데이션
-dark_navy = np.array([18, 45, 90]) / 255
-light_navy = np.array([180, 200, 230]) / 255
-
-colors = []
-
-# 현재 정렬은 낮은 값 → 높은 값
-# 마지막 막대가 1위
-for i in range(len(values)):
-    if i == len(values) - 1:
-        colors.append(hot_pink)
-    else:
-        ratio = i / (len(values) - 2) if len(values) > 2 else 0
-
-        color = (
-            dark_navy * (1 - ratio)
-            + light_navy * ratio
-        )
-
-        colors.append(color)
-
-# --------------------------------------------------
-# 막대그래프
-# --------------------------------------------------
-bars = ax.barh(
-    labels,
-    values,
-    color=colors,
-    edgecolor="none",
-    height=0.68
-)
-
-# --------------------------------------------------
-# 퍼센트 표시
-# --------------------------------------------------
-max_value = max(values)
-
-for bar, value in zip(bars, values):
-    ax.text(
-        value + max_value * 0.015,
-        bar.get_y() + bar.get_height() / 2,
-        f"{value:.2f}%",
-        va="center",
-        fontsize=10,
-        fontweight="bold"
+    st.markdown(
+        '<div class="section-title">🌍 국가를 선택해보세요</div>',
+        unsafe_allow_html=True
     )
 
-# --------------------------------------------------
-# 그래프 디자인
-# --------------------------------------------------
-ax.set_xlabel(
-    "MBTI 비율 (%)",
-    fontsize=12,
-    fontweight="bold"
-)
+    selected_country = st.selectbox(
+        "분석할 국가",
+        df["Country"].tolist(),
+        key="country_select"
+    )
 
-ax.set_ylabel("")
+    # 선택한 국가
+    country_row = df[
+        df["Country"] == selected_country
+    ].iloc[0]
 
-ax.set_title(
-    f"{selected_country}의 MBTI 비율",
-    fontsize=20,
-    fontweight="bold",
-    pad=20
-)
+    # MBTI 데이터
+    country_mbti = country_row[mbti_types].astype(float)
 
-# 위쪽/오른쪽 테두리 제거
-ax.spines["top"].set_visible(False)
-ax.spines["right"].set_visible(False)
+    # 높은 순서
+    country_sorted = country_mbti.sort_values(
+        ascending=False
+    )
 
-# 왼쪽/아래쪽 테두리도 약하게
-ax.spines["left"].set_alpha(0.3)
-ax.spines["bottom"].set_alpha(0.3)
+    # 1위
+    top_mbti = country_sorted.index[0]
+    top_value = country_sorted.iloc[0] * 100
 
-# 격자
-ax.grid(
-    axis="x",
-    linestyle="--",
-    alpha=0.2
-)
+    # -----------------------------------------------------
+    # 1위 박스
+    # -----------------------------------------------------
+    st.markdown(
+        f"""
+        <div class="info-box">
 
-ax.set_axisbelow(True)
+            <div class="country-name">
+                🌍 {selected_country}
+            </div>
 
-# x축 여백
-ax.set_xlim(0, max_value * 1.18)
+            <div style="font-size:17px; margin-top:8px;">
+                가장 높은 MBTI
+            </div>
 
-# 글자 크기
-ax.tick_params(
-    axis="y",
-    labelsize=11
-)
+            <div class="top-mbti">
+                {top_mbti}
+            </div>
 
-ax.tick_params(
-    axis="x",
-    labelsize=10
-)
+            <div class="top-percent">
+                {top_value:.2f}%
+            </div>
 
-plt.tight_layout()
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
-st.pyplot(fig)
+    # -----------------------------------------------------
+    # 세로 막대그래프
+    # -----------------------------------------------------
+    st.markdown(
+        '<div class="section-title">📊 MBTI 비율</div>',
+        unsafe_allow_html=True
+    )
 
-# --------------------------------------------------
-# TOP 3
-# --------------------------------------------------
-st.subheader("🏆 이 나라의 MBTI TOP 3")
+    st.caption(
+        "높은 비율부터 정렬했습니다. "
+        "1위는 핫핑크, 나머지는 남색 계열로 표시됩니다."
+    )
 
-top3 = mbti_data.sort_values(ascending=False).head(3)
+    max_value = country_sorted.max()
 
-col1, col2, col3 = st.columns(3)
+    chart_html = '<div class="chart-area"><div class="vertical-chart">'
 
-medals = ["🥇", "🥈", "🥉"]
+    total = len(country_sorted)
 
-for i, (mbti, value) in enumerate(top3.items()):
-    with [col1, col2, col3][i]:
-        st.metric(
-            f"{medals[i]} {i + 1}위",
-            mbti,
-            f"{value * 100:.2f}%"
-        )
+    for rank, (mbti, value) in enumerate(
+        country_sorted.items(),
+        start=1
+    ):
 
-# --------------------------------------------------
-# 데이터 표
-# --------------------------------------------------
-with st.expander("📋 전체 MBTI 비율 보기"):
-    table = pd.DataFrame({
-        "MBTI": mbti_data.sort_values(ascending=False).index,
-        "비율": [
-            f"{value * 100:.2f}%"
-            for value in mbti_data.sort_values(ascending=False).values
-        ]
-    })
+        percent = value * 100
+
+        # 막대 높이
+        height = (value / max_value) * 85
+
+        # -------------------------------------------------
+        # 색상
+        # -------------------------------------------------
+        if rank == 1:
+
+            color = "#FF1493"
+
+        else:
+
+            ratio = (rank - 2) / max(total - 2, 1)
+
+            start_r, start_g, start_b = 20, 43, 90
+            end_r, end_g, end_b = 175, 195, 225
+
+            r = int(
+                start_r +
+                (end_r - start_r) * ratio
+            )
+
+            g = int(
+                start_g +
+                (end_g - start_g) * ratio
+            )
+
+            b = int(
+                start_b +
+                (end_b - start_b) * ratio
+            )
+
+            color = f"rgb({r},{g},{b})"
+
+        chart_html += f"""
+        <div class="bar-item">
+
+            <div class="bar-value">
+                {percent:.1f}%
+            </div>
+
+            <div
+                class="vertical-bar"
+                style="
+                    height:{height:.1f}%;
+                    background:{color};
+                ">
+            </div>
+
+            <div class="bar-label">
+                {mbti}
+            </div>
+
+            <div class="rank-label">
+                {rank}위
+            </div>
+
+        </div>
+        """
+
+    chart_html += """
+        </div>
+        </div>
+    """
+
+    st.markdown(
+        chart_html,
+        unsafe_allow_html=True
+    )
+
+    # -----------------------------------------------------
+    # TOP 3
+    # -----------------------------------------------------
+    st.markdown(
+        '<div class="section-title">🏆 TOP 3</div>',
+        unsafe_allow_html=True
+    )
+
+    top3 = country_sorted.head(3)
+
+    col1, col2, col3 = st.columns(3)
+
+    columns = [col1, col2, col3]
+    medals = ["🥇", "🥈", "🥉"]
+
+    for i, (mbti, value) in enumerate(top3.items()):
+
+        with columns[i]:
+
+            st.metric(
+                label=f"{medals[i]} {i + 1}위",
+                value=mbti,
+                delta=f"{value * 100:.2f}%"
+            )
+
+
+# =========================================================
+# TAB 2
+# MBTI를 선택하면 국가 순위
+# =========================================================
+with tab2:
+
+    st.markdown(
+        '<div class="section-title">🧠 MBTI를 선택해보세요</div>',
+        unsafe_allow_html=True
+    )
+
+    selected_mbti = st.selectbox(
+        "분석할 MBTI",
+        mbti_types,
+        key="mbti_select"
+    )
+
+    # -----------------------------------------------------
+    # 선택한 MBTI의 국가별 데이터
+    # -----------------------------------------------------
+    country_ranking = df[
+        ["Country", selected_mbti]
+    ].copy()
+
+    country_ranking[selected_mbti] = pd.to_numeric(
+        country_ranking[selected_mbti],
+        errors="coerce"
+    )
+
+    # 결측값 제거
+    country_ranking = country_ranking.dropna(
+        subset=[selected_mbti]
+    )
+
+    # 높은 순서
+    country_ranking = country_ranking.sort_values(
+        by=selected_mbti,
+        ascending=False
+    ).reset_index(drop=True)
+
+    # -----------------------------------------------------
+    # 1위 국가
+    # -----------------------------------------------------
+    first_country = country_ranking.iloc[0]["Country"]
+    first_value = (
+        country_ranking.iloc[0][selected_mbti] * 100
+    )
+
+    st.markdown(
+        f"""
+        <div class="info-box">
+
+            <div class="country-name">
+                🧠 {selected_mbti}
+            </div>
+
+            <div style="font-size:17px; margin-top:8px;">
+                {selected_mbti} 비율이 가장 높은 국가
+            </div>
+
+            <div class="top-mbti">
+                {first_country}
+            </div>
+
+            <div class="top-percent">
+                {first_value:.2f}%
+            </div>
+
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # -----------------------------------------------------
+    # 국가 세로 막대그래프
+    # -----------------------------------------------------
+    st.markdown(
+        f'<div class="section-title">🏆 {selected_mbti} 국가별 순위</div>',
+        unsafe_allow_html=True
+    )
+
+    st.caption(
+        f"{selected_mbti} 비율이 높은 국가부터 1위 → 158위 순서로 표시됩니다."
+    )
+
+    max_country_value = country_ranking[
+        selected_mbti
+    ].max()
+
+    chart_html = '<div class="chart-area"><div class="country-chart">'
+
+    total_countries = len(country_ranking)
+
+    for rank, row in country_ranking.iterrows():
+
+        country = row["Country"]
+
+        value = row[selected_mbti]
+
+        percent = value * 100
+
+        # 막대 높이
+        if max_country_value > 0:
+            height = (
+                value /
+                max_country_value
+            ) * 85
+        else:
+            height = 0
+
+        # -------------------------------------------------
+        # 색상
+        # 1위 = 핫핑크
+        # 나머지 = 남색 그라데이션
+        # -------------------------------------------------
+        if rank == 0:
+
+            color = "#FF1493"
+
+        else:
+
+            ratio = rank / max(
+                total_countries - 1,
+                1
+            )
+
+            start_r, start_g, start_b = 20, 43, 90
+            end_r, end_g, end_b = 175, 195, 225
+
+            r = int(
+                start_r +
+                (end_r - start_r) * ratio
+            )
+
+            g = int(
+                start_g +
+                (end_g - start_g) * ratio
+            )
+
+            b = int(
+                start_b +
+                (end_b - start_b) * ratio
+            )
+
+            color = f"rgb({r},{g},{b})"
+
+        chart_html += f"""
+        <div
+            class="country-bar-item"
+            title="{rank + 1}위 {country} : {percent:.2f}%"
+        >
+
+            <div class="country-value">
+                {percent:.1f}%
+            </div>
+
+            <div
+                class="country-bar"
+                style="
+                    height:{height:.1f}%;
+                    background:{color};
+                ">
+            </div>
+
+            <div class="country-label">
+                {country}
+            </div>
+
+        </div>
+        """
+
+    chart_html += """
+        </div>
+        </div>
+    """
+
+    st.markdown(
+        chart_html,
+        unsafe_allow_html=True
+    )
+
+    # -----------------------------------------------------
+    # TOP 10 표
+    # -----------------------------------------------------
+    st.markdown(
+        f'<div class="section-title">🥇 {selected_mbti} TOP 10 국가</div>',
+        unsafe_allow_html=True
+    )
+
+    top10 = country_ranking.head(10).copy()
+
+    top10.insert(
+        0,
+        "순위",
+        range(1, len(top10) + 1)
+    )
+
+    top10["비율"] = (
+        top10[selected_mbti] * 100
+    ).round(2)
+
+    top10 = top10[
+        ["순위", "Country", "비율"]
+    ]
+
+    top10.columns = [
+        "순위",
+        "국가",
+        "비율 (%)"
+    ]
 
     st.dataframe(
-        table,
+        top10,
         use_container_width=True,
         hide_index=True
     )
 
-# --------------------------------------------------
-# 안내 문구
-# --------------------------------------------------
-st.caption(
-    "💡 이 결과는 제공된 데이터의 국가별 MBTI 비율을 시각화한 것입니다. "
-    "특정 국가의 모든 사람을 대표하는 통계로 해석하지 않는 것이 좋아요."
+
+# =========================================================
+# 안내
+# =========================================================
+st.markdown("---")
+
+st.markdown(
+    """
+    <div class="tip-box">
+    💡 <b>데이터 안내</b><br>
+    이 앱은 제공된 CSV의 국가별 MBTI 비율을 시각화합니다.
+    실제 국가 전체 인구의 MBTI를 대표하는 통계로 해석하기보다는
+    제공된 데이터 안에서 국가별·유형별 비율을 비교하는 용도로
+    이용해주세요.
+    </div>
+    """,
+    unsafe_allow_html=True
 )
