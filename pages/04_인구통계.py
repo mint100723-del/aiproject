@@ -18,10 +18,10 @@ st.set_page_config(
     layout="wide",
 )
 
-PINK = "#FF1493"       # 남성 그래프: 핫핑크
-NAVY = "#172554"       # 여성 그래프: 남색
+PINK = "#FF1493"       # 핫핑크
+NAVY = "#172554"       # 남색
 
-# 이 파일은 pages 폴더 안에 있으므로 상위 폴더에서 CSV를 찾습니다.
+# pages 폴더의 상위 폴더
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -30,7 +30,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 # =========================================================
 @st.cache_data(show_spinner=False)
 def load_csv(file_bytes: bytes):
-    """CSV 인코딩을 순서대로 확인해 읽습니다."""
+    """CSV 인코딩을 확인해서 읽습니다."""
     for encoding in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
         try:
             data = pd.read_csv(
@@ -43,12 +43,13 @@ def load_csv(file_bytes: bytes):
             continue
 
     raise ValueError(
-        "CSV 인코딩을 확인할 수 없습니다. UTF-8 또는 CP949 CSV를 사용해주세요."
+        "CSV 인코딩을 확인할 수 없습니다. "
+        "UTF-8 또는 CP949 CSV를 사용해주세요."
     )
 
 
 def get_csv_bytes(uploaded_file):
-    """업로드 파일이 있으면 우선 사용하고, 없으면 프로젝트 폴더에서 찾습니다."""
+    """업로드 파일 또는 프로젝트 폴더의 CSV를 읽습니다."""
     if uploaded_file is not None:
         return uploaded_file.getvalue(), uploaded_file.name
 
@@ -73,6 +74,7 @@ def to_number(value):
         str(value).replace(",", "").strip(),
         errors="coerce",
     )
+
     if pd.isna(number):
         return None
 
@@ -80,7 +82,7 @@ def to_number(value):
 
 
 def get_age_population(row, year, gender_prefix, age):
-    """특정 행정구역·연도·성별·연령대의 인구수를 가져옵니다."""
+    """특정 연도·성별·연령대의 인구수를 가져옵니다."""
     column_name = f"{year}년_{gender_prefix}거주자_{age}"
 
     if column_name not in row.index:
@@ -114,7 +116,8 @@ try:
     if file_bytes is None:
         st.error(
             "population.csv 파일을 찾을 수 없습니다. "
-            "이 파일을 pages 폴더의 상위 폴더에 넣거나 위에서 직접 업로드해주세요."
+            "이 파일을 pages 폴더의 상위 폴더에 넣거나 "
+            "위에서 직접 업로드해주세요."
         )
         st.stop()
 
@@ -203,7 +206,9 @@ selected_age = st.sidebar.selectbox(
     options=age_labels,
 )
 
-selected_rows = df.loc[df["행정구역"] == selected_area]
+selected_rows = df.loc[
+    df["행정구역"] == selected_area
+]
 
 if selected_rows.empty:
     st.error("선택한 행정구역의 데이터를 찾을 수 없습니다.")
@@ -218,12 +223,19 @@ selected_row = selected_rows.iloc[0]
 gender_chart_data = []
 
 for age in age_labels:
+
     male_count = get_age_population(
-        selected_row, selected_year, "남_", age
+        selected_row,
+        selected_year,
+        "남_",
+        age,
     )
 
     female_count = get_age_population(
-        selected_row, selected_year, "여_", age
+        selected_row,
+        selected_year,
+        "여_",
+        age,
     )
 
     if male_count is not None:
@@ -248,7 +260,8 @@ gender_df = pd.DataFrame(gender_chart_data)
 
 if gender_df.empty:
     st.error(
-        "선택한 행정구역과 연도에 해당하는 남녀 인구 데이터가 없습니다."
+        "선택한 행정구역과 연도에 해당하는 "
+        "남녀 인구 데이터가 없습니다."
     )
     st.stop()
 
@@ -268,8 +281,16 @@ female_total = int(
 
 metric1, metric2, metric3 = st.columns(3)
 
-metric1.metric("남성 인구 합계", f"{male_total:,}명")
-metric2.metric("여성 인구 합계", f"{female_total:,}명")
+metric1.metric(
+    "남성 인구 합계",
+    f"{male_total:,}명"
+)
+
+metric2.metric(
+    "여성 인구 합계",
+    f"{female_total:,}명"
+)
+
 metric3.metric(
     "남녀 인구 합계",
     f"{male_total + female_total:,}명"
@@ -277,7 +298,7 @@ metric3.metric(
 
 
 # =========================================================
-# 7. 남성 핫핑크 · 여성 남색 꺾은선 그래프
+# 7. 남성 핫핑크 · 여성 남색 막대그래프
 # =========================================================
 st.subheader("👫 남녀 연령대별 인구 비교")
 
@@ -286,12 +307,21 @@ st.caption(
     "남성은 핫핑크, 여성은 남색으로 표시합니다."
 )
 
-male_df = gender_df[gender_df["성별"] == "남성"]
-female_df = gender_df[gender_df["성별"] == "여성"]
+male_df = gender_df[
+    gender_df["성별"] == "남성"
+]
+
+female_df = gender_df[
+    gender_df["성별"] == "여성"
+]
 
 all_gender_values = gender_df["인구수"].tolist()
 
-max_population = max(all_gender_values) if all_gender_values else 0
+max_population = (
+    max(all_gender_values)
+    if all_gender_values
+    else 0
+)
 
 y_axis_max = max(
     100_000,
@@ -300,29 +330,29 @@ y_axis_max = max(
 
 gender_fig = go.Figure()
 
-# 남성 그래프
+# 남성 막대그래프
 gender_fig.add_trace(
-    go.Scatter(
+    go.Bar(
         x=male_df["연령대"],
         y=male_df["인구수"],
-        mode="lines+markers",
         name="남성",
-        line={"color": PINK, "width": 4},
-        marker={"color": PINK, "size": 9},
-        hovertemplate="남성 · %{x}<br>%{y:,.0f}명<extra></extra>",
+        marker_color=PINK,
+        hovertemplate=(
+            "남성 · %{x}<br>%{y:,.0f}명<extra></extra>"
+        ),
     )
 )
 
-# 여성 그래프
+# 여성 막대그래프
 gender_fig.add_trace(
-    go.Scatter(
+    go.Bar(
         x=female_df["연령대"],
         y=female_df["인구수"],
-        mode="lines+markers",
         name="여성",
-        line={"color": NAVY, "width": 4},
-        marker={"color": NAVY, "size": 9},
-        hovertemplate="여성 · %{x}<br>%{y:,.0f}명<extra></extra>",
+        marker_color=NAVY,
+        hovertemplate=(
+            "여성 · %{x}<br>%{y:,.0f}명<extra></extra>"
+        ),
     )
 )
 
@@ -350,9 +380,16 @@ gender_fig.update_layout(
 
     plot_bgcolor="#FFFFFF",
     paper_bgcolor="#FFFFFF",
-    hovermode="x unified",
+    barmode="group",
+    bargap=0.18,
+    hovermode="x",
     height=570,
-    margin={"l": 80, "r": 30, "t": 85, "b": 75},
+    margin={
+        "l": 80,
+        "r": 30,
+        "t": 85,
+        "b": 75
+    },
     legend={"title": "성별"},
 )
 
@@ -371,7 +408,9 @@ st.plotly_chart(
 # =========================================================
 st.divider()
 
-st.subheader("🏆 연령대별 인구가 가장 많은 행정구역")
+st.subheader(
+    "🏆 연령대별 인구가 가장 많은 행정구역"
+)
 
 st.write(
     f"**{selected_year}년 {selected_age}** 인구를 "
@@ -458,13 +497,17 @@ else:
                 cliponaxis=False,
 
                 hovertemplate=(
-                    "%{x}<br>인구수: %{y:,.0f}명<extra></extra>"
+                    "%{x}<br>"
+                    "인구수: %{y:,.0f}명"
+                    "<extra></extra>"
                 ),
             )
         ]
     )
 
-    district_max = int(district_chart_df["인구수"].max())
+    district_max = int(
+        district_chart_df["인구수"].max()
+    )
 
     district_y_max = max(
         10,
@@ -472,7 +515,10 @@ else:
     )
 
     district_fig.update_layout(
-        title=f"{selected_year}년 {selected_age} 행정구역별 인구",
+        title=(
+            f"{selected_year}년 "
+            f"{selected_age} 행정구역별 인구"
+        ),
 
         xaxis={
             "title": "행정구역",
@@ -490,7 +536,12 @@ else:
         plot_bgcolor="#FFFFFF",
         paper_bgcolor="#FFFFFF",
         height=450,
-        margin={"l": 80, "r": 30, "t": 85, "b": 75},
+        margin={
+            "l": 80,
+            "r": 30,
+            "t": 85,
+            "b": 75
+        },
         showlegend=False,
     )
 
@@ -534,8 +585,8 @@ st.divider()
 st.subheader("📈 추가 분석: 연도별 남녀 인구 변화")
 
 st.write(
-    f"**{selected_area}**의 2020~2025년 남녀 전체 인구가 "
-    "어떻게 변했는지 확인할 수 있어요."
+    f"**{selected_area}**의 연도별 남녀 전체 인구를 "
+    "막대그래프로 비교할 수 있어요."
 )
 
 trend_rows = []
@@ -576,42 +627,53 @@ trend_df = pd.DataFrame(trend_rows)
 
 if trend_df.empty:
 
-    st.info("연도별 남녀 인구 변화 데이터를 만들 수 없습니다.")
+    st.info(
+        "연도별 남녀 인구 변화 데이터를 만들 수 없습니다."
+    )
 
 else:
 
-    trend_male = trend_df[trend_df["성별"] == "남성"]
-    trend_female = trend_df[trend_df["성별"] == "여성"]
+    trend_male = trend_df[
+        trend_df["성별"] == "남성"
+    ]
+
+    trend_female = trend_df[
+        trend_df["성별"] == "여성"
+    ]
 
     trend_fig = go.Figure()
 
-    # 연도별 남성 인구
+    # 연도별 남성 인구 막대
     trend_fig.add_trace(
-        go.Scatter(
+        go.Bar(
             x=trend_male["연도"],
             y=trend_male["인구수"],
-            mode="lines+markers",
             name="남성",
-            line={"color": PINK, "width": 4},
-            marker={"color": PINK, "size": 9},
-            hovertemplate="남성 · %{x}년<br>%{y:,.0f}명<extra></extra>",
+            marker_color=PINK,
+            hovertemplate=(
+                "남성 · %{x}년<br>"
+                "%{y:,.0f}명<extra></extra>"
+            ),
         )
     )
 
-    # 연도별 여성 인구
+    # 연도별 여성 인구 막대
     trend_fig.add_trace(
-        go.Scatter(
+        go.Bar(
             x=trend_female["연도"],
             y=trend_female["인구수"],
-            mode="lines+markers",
             name="여성",
-            line={"color": NAVY, "width": 4},
-            marker={"color": NAVY, "size": 9},
-            hovertemplate="여성 · %{x}년<br>%{y:,.0f}명<extra></extra>",
+            marker_color=NAVY,
+            hovertemplate=(
+                "여성 · %{x}년<br>"
+                "%{y:,.0f}명<extra></extra>"
+            ),
         )
     )
 
-    trend_max = int(trend_df["인구수"].max())
+    trend_max = int(
+        trend_df["인구수"].max()
+    )
 
     trend_y_max = max(
         100_000,
@@ -639,9 +701,16 @@ else:
 
         plot_bgcolor="#FFFFFF",
         paper_bgcolor="#FFFFFF",
-        hovermode="x unified",
+        barmode="group",
+        bargap=0.22,
+        hovermode="x",
         height=480,
-        margin={"l": 80, "r": 30, "t": 80, "b": 65},
+        margin={
+            "l": 80,
+            "r": 30,
+            "t": 80,
+            "b": 65
+        },
         legend={"title": "성별"},
     )
 
@@ -665,12 +734,21 @@ else:
 
         if len(part) >= 2:
 
-            part["연도숫자"] = part["연도"].astype(int)
+            part["연도숫자"] = (
+                part["연도"].astype(int)
+            )
 
-            part = part.sort_values("연도숫자")
+            part = part.sort_values(
+                "연도숫자"
+            )
 
-            first_value = int(part.iloc[0]["인구수"])
-            last_value = int(part.iloc[-1]["인구수"])
+            first_value = int(
+                part.iloc[0]["인구수"]
+            )
+
+            last_value = int(
+                part.iloc[-1]["인구수"]
+            )
 
             difference = last_value - first_value
 
@@ -685,16 +763,22 @@ else:
 
     if trend_summary:
 
-        summary_df = pd.DataFrame(trend_summary)
+        summary_df = pd.DataFrame(
+            trend_summary
+        )
 
-        summary_cols = st.columns(len(summary_df))
+        summary_cols = st.columns(
+            len(summary_df)
+        )
 
         for index, row in summary_df.iterrows():
 
             with summary_cols[index]:
 
                 st.metric(
-                    f"{row['성별']} 인구 변화 ({years[0]}~{years[-1]}년)",
+                    f"{row['성별']} 인구 변화 "
+                    f"({years[0]}~{years[-1]}년)",
+
                     f"{int(row['증감 인구']):+,}명",
 
                     help=(
@@ -730,7 +814,9 @@ with st.expander("📋 남녀 그래프 데이터 확인 및 다운로드"):
     st.download_button(
         "📥 남녀 인구 데이터 CSV 다운로드",
         data=csv_bytes,
-        file_name=f"jeju_{selected_year}_male_female_population.csv",
+        file_name=(
+            f"jeju_{selected_year}_male_female_population.csv"
+        ),
         mime="text/csv",
     )
 
@@ -743,7 +829,13 @@ with st.expander("ℹ️ 데이터 파일 정보"):
     st.write(f"파일 이름: {file_name}")
     st.write(f"감지된 인코딩: {used_encoding}")
     st.write(f"전체 행정구역 수: {len(areas)}개")
-    st.write(f"분석 가능한 연도: {', '.join(map(str, years))}")
-    st.write(f"원본 데이터 결측치: {int(df.isna().sum().sum()):,}개")
+    st.write(
+        f"분석 가능한 연도: {', '.join(map(str, years))}"
+    )
+    st.write(
+        f"원본 데이터 결측치: {int(df.isna().sum().sum()):,}개"
+    )
 
-st.success("남녀 비교와 연령대별 행정구역 분석이 완료됐어요! 🌸")
+st.success(
+    "남녀 비교와 연령대별 행정구역 분석이 완료됐어요! 🌸"
+)
