@@ -21,7 +21,6 @@ st.set_page_config(
 PINK = "#FF1493"
 NAVY = "#172554"
 
-# pages 폴더의 상위 폴더
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -42,7 +41,7 @@ def load_csv(file_bytes: bytes):
             continue
 
     raise ValueError(
-        "CSV 인코딩을 확인할 수 없습니다. UTF-8 또는 CP949 파일을 사용해주세요."
+        "CSV 인코딩을 확인할 수 없습니다. UTF-8 또는 CP949 CSV를 사용해주세요."
     )
 
 
@@ -145,7 +144,7 @@ years = sorted(
 )
 
 if not years:
-    st.error("연도별 데이터 열을 찾지 못했습니다.")
+    st.error("연도별 열을 찾지 못했습니다.")
     st.stop()
 
 age_labels = [
@@ -262,7 +261,7 @@ metric3.metric(
 
 
 # =========================================================
-# 7. 남녀 연령대별 인구 비교 - 선 그래프 유지
+# 7. 남성 핫핑크 · 여성 남색 선 그래프
 # =========================================================
 st.subheader("👫 남녀 연령대별 인구 비교")
 
@@ -353,8 +352,6 @@ st.write(
     "행정구역별로 비교합니다."
 )
 
-# 제주특별자치도 전체 행은 합계이므로
-# 제주시·서귀포시끼리 비교할 때 제외합니다.
 district_df = df[
     df["행정구역"].str.contains("시", regex=False)
     & (df["행정구역"] != "제주특별자치도")
@@ -464,9 +461,9 @@ else:
     )
 
     st.caption(
-        "인구가 가장 많은 행정구역은 핫핑크, "
+        "가장 인구가 많은 행정구역은 핫핑크, "
         "나머지는 남색으로 표시했습니다. "
-        "제주특별자치도 전체 합계 행은 비교에서 제외했습니다."
+        "제주특별자치도 전체 합계 행은 시 단위 비교에서 제외했습니다."
     )
 
     with st.expander("📋 행정구역별 인구 순위표"):
@@ -486,14 +483,14 @@ else:
 
 
 # =========================================================
-# 9. 추가 기능: 연도별 남녀 인구 변화 추이 - 선 그래프
+# 9. 추가 분석: 선택한 연령대의 연도별 남녀 인구 변화
 # =========================================================
 st.divider()
-st.subheader("📈 추가 분석: 연도별 남녀 인구 변화")
+st.subheader("📈 추가 분석: 연령대별 연도별 남녀 인구 변화")
 
 st.write(
-    f"**{selected_area}**의 연도별 남녀 전체 인구 변화를 "
-    "선 그래프로 확인해 보세요."
+    f"**{selected_area} · {selected_age}**의 연도별 남녀 인구 변화를 "
+    "확인할 수 있어요. 위에서 선택한 연령대가 이 그래프에도 반영됩니다."
 )
 
 trend_rows = []
@@ -503,34 +500,27 @@ for year in years:
         ("남성", "남_"),
         ("여성", "여_"),
     ]:
-        yearly_total = 0
-        has_value = False
+        value = get_age_population(
+            selected_row,
+            year,
+            gender_prefix,
+            selected_age,
+        )
 
-        for age in age_labels:
-            value = get_age_population(
-                selected_row,
-                year,
-                gender_prefix,
-                age,
-            )
-
-            if value is not None:
-                yearly_total += value
-                has_value = True
-
-        if has_value:
+        if value is not None:
             trend_rows.append(
                 {
                     "연도": str(year),
                     "성별": gender_name,
-                    "인구수": yearly_total,
+                    "연령대": selected_age,
+                    "인구수": value,
                 }
             )
 
 trend_df = pd.DataFrame(trend_rows)
 
 if trend_df.empty:
-    st.info("연도별 남녀 인구 변화 데이터를 만들 수 없습니다.")
+    st.info("선택한 연령대의 연도별 남녀 인구 데이터가 없습니다.")
 else:
     trend_male = trend_df[trend_df["성별"] == "남성"]
     trend_female = trend_df[trend_df["성별"] == "여성"]
@@ -542,9 +532,12 @@ else:
             x=trend_male["연도"],
             y=trend_male["인구수"],
             name="남성",
-            mode="lines+markers",
-            line={"color": PINK, "width": 3},
-            marker={"color": PINK, "size": 8},
+            mode="lines+markers+text",
+            line={"color": PINK, "width": 4},
+            marker={"color": PINK, "size": 11},
+            text=[f"{int(v):,}" for v in trend_male["인구수"]],
+            textposition="top center",
+            textfont={"size": 12, "color": PINK},
             hovertemplate="남성 · %{x}년<br>%{y:,.0f}명<extra></extra>",
         )
     )
@@ -554,51 +547,73 @@ else:
             x=trend_female["연도"],
             y=trend_female["인구수"],
             name="여성",
-            mode="lines+markers",
-            line={"color": NAVY, "width": 3},
-            marker={"color": NAVY, "size": 8},
+            mode="lines+markers+text",
+            line={"color": NAVY, "width": 4},
+            marker={"color": NAVY, "size": 11},
+            text=[f"{int(v):,}" for v in trend_female["인구수"]],
+            textposition="bottom center",
+            textfont={"size": 12, "color": NAVY},
             hovertemplate="여성 · %{x}년<br>%{y:,.0f}명<extra></extra>",
         )
     )
 
     trend_max = int(trend_df["인구수"].max())
+    trend_min = int(trend_df["인구수"].min())
 
-    trend_y_max = max(
-        100_000,
-        math.ceil(trend_max / 100_000) * 100_000,
+    trend_padding = max(
+        10,
+        int((trend_max - trend_min) * 0.25),
     )
 
+    trend_y_min = max(0, trend_min - trend_padding)
+    trend_y_max = trend_max + trend_padding
+
     trend_fig.update_layout(
-        title=f"{selected_area} 연도별 남녀 인구 변화",
+        title=f"{selected_area} · {selected_age} 연도별 남녀 인구 변화",
+        autosize=False,
+        width=1800,
+        height=600,
         xaxis={
-            "title": "연도",
+            "title": {"text": "연도", "font": {"size": 16}},
             "type": "category",
+            "categoryorder": "array",
+            "categoryarray": [str(year) for year in years],
+            "tickfont": {"size": 15},
+            "tickmode": "array",
+            "tickvals": [str(year) for year in years],
+            "ticktext": [f"{year}년" for year in years],
             "showgrid": True,
             "gridcolor": "#E6E6E6",
+            "automargin": True,
+            "fixedrange": False,
         },
         yaxis={
-            "title": "인구수 (명)",
-            "range": [0, trend_y_max],
-            "dtick": 100_000,
+            "title": {"text": "인구수 (명)", "font": {"size": 16}},
+            "range": [trend_y_min, trend_y_max],
             "tickformat": ",d",
+            "tickfont": {"size": 13},
             "showgrid": True,
             "gridcolor": "#D8D8D8",
+            "automargin": True,
         },
         plot_bgcolor="#FFFFFF",
         paper_bgcolor="#FFFFFF",
-        hovermode="x",
-        height=480,
-        margin={"l": 80, "r": 30, "t": 80, "b": 65},
-        legend={"title": "성별"},
+        hovermode="x unified",
+        margin={"l": 100, "r": 80, "t": 100, "b": 100},
+        legend={"title": "성별", "font": {"size": 14}},
     )
 
     st.plotly_chart(
         trend_fig,
-        use_container_width=True,
-        config={"displaylogo": False, "responsive": True},
+        use_container_width=False,
+        config={
+            "displaylogo": False,
+            "responsive": False,
+            "scrollZoom": True,
+        },
     )
 
-    # 첫 연도와 마지막 연도의 인구 차이 계산
+    # 선택한 연령대 기준으로 첫해와 최근 연도의 인구 차이를 계산합니다.
     trend_summary = []
 
     for gender_name in ["남성", "여성"]:
@@ -630,7 +645,8 @@ else:
         for index, row in summary_df.iterrows():
             with summary_cols[index]:
                 st.metric(
-                    f"{row['성별']} 인구 변화 ({years[0]}~{years[-1]}년)",
+                    f"{row['성별']} · {selected_age} 인구 변화 "
+                    f"({years[0]}~{years[-1]}년)",
                     f"{int(row['증감 인구']):+,}명",
                     help=(
                         f"첫해 {int(row['첫해 인구']):,}명 → "
@@ -638,7 +654,7 @@ else:
                     ),
                 )
 
-    with st.expander("📋 연도별 남녀 인구 데이터 보기"):
+    with st.expander("📋 선택한 연령대의 연도별 남녀 인구 데이터 보기"):
         st.dataframe(
             trend_df,
             use_container_width=True,
