@@ -1,21 +1,23 @@
 import streamlit as st
 import pandas as pd
 import streamlit.components.v1 as components
+from pathlib import Path
+import html
 
 
-# =========================================================
+# ==================================================
 # 페이지 설정
-# =========================================================
+# ==================================================
 st.set_page_config(
-    page_title="🌎 국가별 MBTI 분석",
+    page_title="국가별 MBTI 분석",
     page_icon="🌎",
     layout="wide"
 )
 
 
-# =========================================================
+# ==================================================
 # MBTI 목록
-# =========================================================
+# ==================================================
 MBTI_TYPES = [
     "INFJ", "ISFJ", "INTP", "ISFP",
     "ENTP", "INFP", "ENTJ", "ISTP",
@@ -24,258 +26,151 @@ MBTI_TYPES = [
 ]
 
 
-# =========================================================
-# 전체 기본 스타일
-# =========================================================
+# ==================================================
+# CSS 디자인
+# HTML 카드 사용하지 않음
+# ==================================================
 st.markdown("""
 <style>
     .main-title {
-        font-size: 42px;
-        font-weight: 800;
         text-align: center;
-        margin-bottom: 5px;
+        font-size: 36px;
+        font-weight: 800;
+        color: #17345E;
+        padding: 15px 0 5px 0;
     }
 
     .main-subtitle {
         text-align: center;
-        color: #666;
-        font-size: 17px;
-        margin-bottom: 30px;
+        color: gray;
+        font-size: 16px;
+        margin-bottom: 25px;
     }
 
-    .first-card {
-        background: linear-gradient(135deg, #fff0f7, #ffe1ef);
-        border-radius: 18px;
-        padding: 20px;
-        text-align: center;
-        border: 2px solid #ff1493;
-        margin: 15px 0 25px 0;
-    }
-
-    .first-title {
-        font-size: 18px;
-        color: #555;
-    }
-
-    .first-name {
-        font-size: 32px;
-        font-weight: 800;
-        color: #ff1493;
-        margin: 5px 0;
-    }
-
-    .first-value {
-        font-size: 22px;
-        font-weight: 700;
-        color: #172554;
+    h2, h3 {
+        color: #17345E;
     }
 </style>
 """, unsafe_allow_html=True)
 
 
-# =========================================================
-# 제목
-# =========================================================
 st.markdown(
     '<div class="main-title">🌎 국가별 MBTI 분석</div>',
     unsafe_allow_html=True
 )
 
 st.markdown(
-    '<div class="main-subtitle">'
-    '나라별 MBTI 비율을 재미있게 비교해보세요! 🧠✨'
-    '</div>',
+    '<div class="main-subtitle">16가지 MBTI로 세계 여러 나라를 비교해 보세요! 🧠</div>',
     unsafe_allow_html=True
 )
 
 
-# =========================================================
+# ==================================================
+# CSV 파일 경로
+# pages 폴더의 상위 폴더에서 CSV 찾기
+# ==================================================
+BASE_DIR = Path(__file__).resolve().parent.parent
+CSV_PATH = BASE_DIR / "countriesMBTI_16types.csv"
+
+
+# ==================================================
 # 데이터 불러오기
-# =========================================================
+# ==================================================
 @st.cache_data
-def load_data():
+def load_data(file_path):
 
-    df = pd.read_csv("countriesMBTI_16types.csv")
+    data = pd.read_csv(file_path)
 
-    df.columns = df.columns.str.strip()
+    data.columns = data.columns.str.strip()
 
-    df["Country"] = (
-        df["Country"]
-        .astype(str)
-        .str.strip()
-    )
+    if "Country" not in data.columns:
+        raise ValueError("CSV에 Country 컬럼이 없습니다.")
+
+    data["Country"] = data["Country"].astype(str).str.strip()
 
     for mbti in MBTI_TYPES:
-        df[mbti] = pd.to_numeric(
-            df[mbti],
+        if mbti not in data.columns:
+            raise ValueError(f"{mbti} 컬럼이 CSV에 없습니다.")
+
+        data[mbti] = pd.to_numeric(
+            data[mbti],
             errors="coerce"
         )
 
-    return df
+    return data
 
 
 try:
-
-    df = load_data()
+    df = load_data(str(CSV_PATH))
 
 except FileNotFoundError:
-
-    st.error(
-        "❌ countriesMBTI_16types.csv 파일을 찾을 수 없습니다."
-    )
-
-    st.info(
-        "CSV 파일을 app.py와 같은 최상위 폴더에 넣어주세요."
-    )
-
+    st.error("CSV 파일을 찾을 수 없습니다.")
+    st.info("countriesMBTI_16types.csv 파일을 최상위 폴더에 넣어주세요.")
     st.stop()
 
 except Exception as e:
-
-    st.error(
-        f"❌ CSV 파일을 읽는 중 오류가 발생했습니다: {e}"
-    )
-
+    st.error(f"데이터 오류: {e}")
     st.stop()
 
 
-# =========================================================
-# 데이터 검증
-# =========================================================
-if "Country" not in df.columns:
+# ==================================================
+# 그래프 HTML 생성
+# ==================================================
+def make_bar_chart(labels, values, title, max_height=330):
 
-    st.error(
-        "❌ CSV 파일에 Country 컬럼이 없습니다."
-    )
-
-    st.stop()
-
-
-missing = [
-    mbti
-    for mbti in MBTI_TYPES
-    if mbti not in df.columns
-]
-
-if missing:
-
-    st.error(
-        "❌ 다음 MBTI 컬럼이 없습니다: "
-        + ", ".join(missing)
-    )
-
-    st.stop()
-
-
-# =========================================================
-# 막대그래프 HTML 생성 함수
-# =========================================================
-def make_bar_chart(
-    labels,
-    values,
-    title="",
-    max_height=320
-):
-
-    if len(labels) == 0:
-
+    if not labels:
         return "<p>표시할 데이터가 없습니다.</p>"
 
-
-    # 최대값
-    max_value = max(values)
-
-    if max_value <= 0:
-        max_value = 1
-
-
-    # 막대 HTML
-    bars_html = ""
-
+    max_value = max(values) if max(values) > 0 else 1
     total = len(labels)
 
+    bars = []
 
-    for i, (label, value) in enumerate(
-        zip(labels, values)
-    ):
+    for i, (label, value) in enumerate(zip(labels, values)):
 
-        # 첫 번째 = 핫핑크
+        # 1위 핫핑크
         if i == 0:
-
             color = "#FF1493"
 
+        # 나머지 네이비 그라데이션
         else:
+            ratio = i / max(total - 1, 1)
 
-            # 네이비 계열 그라데이션
-            if total <= 1:
-                ratio = 1
-            else:
-                ratio = i / (total - 1)
-
-            r = int(
-                15 + (115 - 15) * ratio
-            )
-
-            g = int(
-                35 + (140 - 35) * ratio
-            )
-
-            b = int(
-                80 + (195 - 80) * ratio
-            )
+            r = int(15 + (120 - 15) * ratio)
+            g = int(35 + (145 - 35) * ratio)
+            b = int(80 + (205 - 80) * ratio)
 
             color = f"rgb({r},{g},{b})"
 
+        height = max((value / max_value) * max_height, 3)
 
-        # 막대 높이
-        height = (
-            value / max_value
-        ) * max_height
+        safe_label = html.escape(str(label))
 
+        bars.append(f"""
+            <div class="bar-item">
+                <div class="bar-value">{value:.2f}%</div>
 
-        # 너무 작은 막대도 보이도록
-        if height < 4 and value > 0:
-            height = 4
+                <div class="bar-area">
+                    <div class="bar"
+                         style="height:{height:.1f}px;
+                                background:{color};">
+                    </div>
+                </div>
 
-
-        bars_html += f"""
-        <div class="bar-item">
-
-            <div class="bar-value">
-                {value:.2f}%
+                <div class="bar-label">{safe_label}</div>
             </div>
+        """)
 
-            <div class="bar-area">
+    bars_html = "".join(bars)
+    safe_title = html.escape(title)
 
-                <div
-                    class="bar"
-                    style="
-                        height:{height}px;
-                        background:{color};
-                    "
-                ></div>
-
-            </div>
-
-            <div class="bar-label">
-                {label}
-            </div>
-
-        </div>
-        """
-
-
-    html = f"""
+    return f"""
     <!DOCTYPE html>
-
     <html>
-
     <head>
-
     <meta charset="UTF-8">
 
     <style>
-
         * {{
             box-sizing: border-box;
         }}
@@ -283,25 +178,21 @@ def make_bar_chart(
         body {{
             margin: 0;
             padding: 15px 5px;
-            font-family:
-                Arial,
-                "Noto Sans KR",
-                sans-serif;
+            font-family: Arial, sans-serif;
             background: transparent;
         }}
 
         .chart-title {{
             text-align: center;
             font-size: 20px;
-            font-weight: 700;
-            color: #172554;
+            font-weight: bold;
+            color: #17345E;
             margin-bottom: 20px;
         }}
 
         .scroll {{
             width: 100%;
             overflow-x: auto;
-            overflow-y: hidden;
             padding: 10px 5px 20px 5px;
         }}
 
@@ -312,11 +203,11 @@ def make_bar_chart(
             min-width: max-content;
             height: {max_height + 100}px;
             padding: 10px 15px 0 15px;
-            border-bottom: 2px solid #172554;
+            border-bottom: 2px solid #17345E;
         }}
 
         .bar-item {{
-            width: 58px;
+            width: 62px;
             height: 100%;
             display: flex;
             flex-direction: column;
@@ -326,8 +217,8 @@ def make_bar_chart(
 
         .bar-value {{
             font-size: 12px;
-            font-weight: 700;
-            color: #172554;
+            font-weight: bold;
+            color: #17345E;
             height: 22px;
             white-space: nowrap;
         }}
@@ -342,236 +233,142 @@ def make_bar_chart(
 
         .bar {{
             width: 38px;
-            min-height: 3px;
             border-radius: 7px 7px 0 0;
-            transition: all 0.2s ease;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.12);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+            transition: opacity 0.2s;
         }}
 
         .bar:hover {{
-            opacity: 0.75;
-            transform: scaleX(1.08);
+            opacity: 0.7;
         }}
 
         .bar-label {{
             margin-top: 9px;
             font-size: 12px;
-            font-weight: 700;
-            color: #172554;
+            font-weight: bold;
+            color: #17345E;
             text-align: center;
             width: 70px;
-            word-break: break-word;
+            overflow-wrap: anywhere;
         }}
-
     </style>
-
     </head>
 
     <body>
-
-        <div class="chart-title">
-            {title}
-        </div>
+        <div class="chart-title">{safe_title}</div>
 
         <div class="scroll">
-
             <div class="chart">
-
                 {bars_html}
-
             </div>
-
         </div>
-
     </body>
-
     </html>
     """
 
-    return html
+
+# ==================================================
+# 탭 구성
+# ==================================================
+tab1, tab2 = st.tabs([
+    "🌍 국가 → MBTI",
+    "🧠 MBTI → 국가"
+])
 
 
-# =========================================================
-# 탭
-# =========================================================
-tab1, tab2 = st.tabs(
-    [
-        "🌍 국가 → MBTI",
-        "🧠 MBTI → 국가"
-    ]
-)
-
-
-# =========================================================
+# ==================================================
 # TAB 1
-# 국가 선택 → MBTI 비율
-# =========================================================
+# 국가별 MBTI 분석
+# ==================================================
 with tab1:
 
-    st.subheader(
-        "🌍 국가별 MBTI 비율"
-    )
-
+    st.subheader("🌍 국가별 MBTI 비율")
 
     countries = sorted(
-        df["Country"]
-        .dropna()
-        .unique()
-        .tolist()
+        df["Country"].dropna().unique().tolist()
     )
 
+    if not countries:
+        st.warning("국가 데이터가 없습니다.")
+        st.stop()
 
     selected_country = st.selectbox(
         "국가를 선택하세요 👇",
         countries
     )
 
-
-    # 선택 국가 데이터
     country_row = df[
         df["Country"] == selected_country
     ].iloc[0]
 
+    country_data = pd.DataFrame({
+        "MBTI": MBTI_TYPES,
+        "비율": [
+            country_row[mbti] * 100
+            if pd.notna(country_row[mbti])
+            else None
+            for mbti in MBTI_TYPES
+        ]
+    })
 
-    data = []
+    country_data = country_data.dropna(
+        subset=["비율"]
+    )
 
+    country_data = country_data.sort_values(
+        "비율",
+        ascending=False
+    ).reset_index(drop=True)
 
-    for mbti in MBTI_TYPES:
+    if country_data.empty:
+        st.warning("선택한 국가의 MBTI 데이터가 없습니다.")
+        st.stop()
 
-        value = country_row[mbti]
+    first = country_data.iloc[0]
 
-        if pd.notna(value):
+    st.markdown("### 🏆 이 국가의 1위 MBTI")
 
-            data.append(
-                {
-                    "MBTI": mbti,
-                    "비율": float(value) * 100
-                }
-            )
+    metric1, metric2 = st.columns(2)
 
-
-    country_chart_df = pd.DataFrame(data)
-
-
-    country_chart_df = (
-        country_chart_df
-        .sort_values(
-            "비율",
-            ascending=False
+    with metric1:
+        st.metric(
+            "🥇 1위 MBTI",
+            first["MBTI"]
         )
-        .reset_index(drop=True)
-    )
 
+    with metric2:
+        st.metric(
+            "📊 비율",
+            f'{first["비율"]:.2f}%'
+        )
 
-    # -----------------------------------------------------
-    # 1위
-    # -----------------------------------------------------
-    first_mbti = (
-        country_chart_df.iloc[0]["MBTI"]
-    )
+    st.markdown("### 🥇 TOP 3")
 
-    first_value = (
-        country_chart_df.iloc[0]["비율"]
-    )
+    top3 = st.columns(3)
 
+    medals = ["🥇", "🥈", "🥉"]
 
-    st.markdown(
-        f"""
-        <div class="first-card">
+    for i in range(min(3, len(country_data))):
 
-            <div class="first-title">
-                🏆 {selected_country}에서 가장 높은 MBTI
-            </div>
+        row = country_data.iloc[i]
 
-            <div class="first-name">
-                {first_mbti}
-            </div>
-
-            <div class="first-value">
-                {first_value:.2f}%
-            </div>
-
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-    # -----------------------------------------------------
-    # TOP 3
-    # -----------------------------------------------------
-    st.markdown("### 🏆 TOP 3")
-
-
-    top1, top2, top3 = st.columns(3)
-
-
-    top3_data = country_chart_df.head(3)
-
-
-    if len(top3_data) >= 1:
-
-        row = top3_data.iloc[0]
-
-        with top1:
-
+        with top3[i]:
             st.metric(
-                "🥇 1위",
+                f'{medals[i]} {i + 1}위',
                 row["MBTI"],
                 f'{row["비율"]:.2f}%'
             )
 
+    st.divider()
 
-    if len(top3_data) >= 2:
-
-        row = top3_data.iloc[1]
-
-        with top2:
-
-            st.metric(
-                "🥈 2위",
-                row["MBTI"],
-                f'{row["비율"]:.2f}%'
-            )
-
-
-    if len(top3_data) >= 3:
-
-        row = top3_data.iloc[2]
-
-        with top3:
-
-            st.metric(
-                "🥉 3위",
-                row["MBTI"],
-                f'{row["비율"]:.2f}%'
-            )
-
-
-    st.markdown("---")
-
-
-    # -----------------------------------------------------
-    # MBTI 막대그래프
-    # -----------------------------------------------------
-    labels = (
-        country_chart_df["MBTI"]
-        .tolist()
-    )
-
-    values = (
-        country_chart_df["비율"]
-        .tolist()
-    )
-
+    st.markdown("### 📊 국가별 MBTI 막대그래프")
 
     chart_html = make_bar_chart(
-        labels,
-        values,
-        title=f"📊 {selected_country}의 MBTI 비율",
-        max_height=330
+        country_data["MBTI"].tolist(),
+        country_data["비율"].tolist(),
+        f"{selected_country}의 MBTI 분포",
+        330
     )
-
 
     components.html(
         chart_html,
@@ -580,146 +377,79 @@ with tab1:
     )
 
 
-# =========================================================
+# ==================================================
 # TAB 2
-# MBTI 선택 → 국가 순위
-# =========================================================
+# MBTI별 국가 분석
+# ==================================================
 with tab2:
 
-    st.subheader(
-        "🧠 MBTI별 국가 순위"
-    )
-
+    st.subheader("🧠 MBTI별 국가 순위")
 
     selected_mbti = st.selectbox(
         "MBTI를 선택하세요 👇",
-        MBTI_TYPES
+        MBTI_TYPES,
+        key="selected_mbti"
     )
-
 
     ranking_df = df[
         ["Country", selected_mbti]
     ].copy()
 
-
     ranking_df["비율"] = (
         ranking_df[selected_mbti] * 100
     )
 
-
     ranking_df = ranking_df[
         ["Country", "비율"]
-    ]
+    ].dropna(subset=["비율"])
 
+    ranking_df = ranking_df.sort_values(
+        "비율",
+        ascending=False
+    ).reset_index(drop=True)
 
-    ranking_df = ranking_df.dropna(
-        subset=["비율"]
-    )
-
-
-    ranking_df = (
-        ranking_df
-        .sort_values(
-            "비율",
-            ascending=False
-        )
-        .reset_index(drop=True)
-    )
-
+    if ranking_df.empty:
+        st.warning("해당 MBTI의 국가별 데이터가 없습니다.")
+        st.stop()
 
     ranking_df.insert(
         0,
         "순위",
-        range(
-            1,
-            len(ranking_df) + 1
+        range(1, len(ranking_df) + 1)
+    )
+
+    first_country = ranking_df.iloc[0]
+
+    st.markdown("### 🏆 1위 국가")
+
+    metric1, metric2 = st.columns(2)
+
+    with metric1:
+        st.metric(
+            "🌎 국가",
+            first_country["Country"]
         )
-    )
 
+    with metric2:
+        st.metric(
+            "📊 비율",
+            f'{first_country["비율"]:.2f}%'
+        )
 
-    # -----------------------------------------------------
-    # 1위 국가
-    # -----------------------------------------------------
-    first_country = (
-        ranking_df.iloc[0]["Country"]
-    )
-
-    first_value = (
-        ranking_df.iloc[0]["비율"]
-    )
-
+    st.divider()
 
     st.markdown(
-        f"""
-        <div class="first-card">
-
-            <div class="first-title">
-                🏆 {selected_mbti} 비율이 가장 높은 국가
-            </div>
-
-            <div class="first-name">
-                {first_country}
-            </div>
-
-            <div class="first-value">
-                {first_value:.2f}%
-            </div>
-
-        </div>
-        """,
-        unsafe_allow_html=True
+        f"### 📊 {selected_mbti} 국가별 TOP 20"
     )
 
-
-    # -----------------------------------------------------
-    # 기본 정보
-    # -----------------------------------------------------
-    info1, info2 = st.columns(2)
-
-
-    with info1:
-
-        st.metric(
-            "🌎 조사 국가 수",
-            f"{len(ranking_df)}개"
-        )
-
-
-    with info2:
-
-        st.metric(
-            f"🧠 {selected_mbti} 최고 비율",
-            f"{first_value:.2f}%"
-        )
-
-
-    st.markdown("---")
-
-
-    # -----------------------------------------------------
-    # 상위 20개 국가 그래프
-    # -----------------------------------------------------
     top20 = ranking_df.head(20)
 
-
-    labels = (
-        top20["Country"]
-        .tolist()
-    )
-
-    values = (
-        top20["비율"]
-        .tolist()
-    )
-
-
     chart_html = make_bar_chart(
-        labels,
-        values,
-        title=f"📊 {selected_mbti} 국가별 TOP 20",
-        max_height=330
+        top20["Country"].tolist(),
+        top20["비율"].tolist(),
+        f"{selected_mbti} 국가별 순위",
+        330
     )
-
 
     components.html(
         chart_html,
@@ -727,38 +457,24 @@ with tab2:
         scrolling=True
     )
 
-
     st.caption(
-        "💡 그래프는 상위 20개 국가를 보여주며, "
+        "💡 그래프는 상위 20개 국가를 보여줍니다. "
         "아래 표에서 전체 국가 순위를 확인할 수 있어요."
     )
 
-
-    # -----------------------------------------------------
-    # 전체 순위표
-    # -----------------------------------------------------
-    st.markdown(
-        f"### 🏆 {selected_mbti} 전체 국가 순위"
-    )
-
+    st.markdown("### 🏆 전체 국가 순위")
 
     display_df = ranking_df.copy()
 
-
-    display_df["비율"] = (
-        display_df["비율"]
-        .map(
-            lambda x: f"{x:.2f}%"
-        )
+    display_df["비율"] = display_df["비율"].map(
+        lambda x: f"{x:.2f}%"
     )
-
 
     display_df.columns = [
         "순위",
         "국가",
         "비율"
     ]
-
 
     st.dataframe(
         display_df,
