@@ -3,252 +3,281 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from pathlib import Path
 import re
+import math
+from pathlib import Path
 
-# ==================================================
-# 1. 페이지 설정
-# ==================================================
+# =====================================================
+# 1. 페이지 기본 설정
+# =====================================================
 st.set_page_config(
-    page_title="서울 월별 기온 예측",
+    page_title="서울 기온 예측",
     page_icon="🌡️",
     layout="wide"
 )
 
 st.title("🌡️ 서울 월별 평균기온 예측")
-st.write(
-    "원하는 월과 예측 연도를 선택하고 "
-    "세 가지 회귀 알고리즘의 예측 결과를 비교해 봐!"
-)
+st.write("과거 기온 데이터를 바탕으로 미래의 평균기온을 예측해 봐요!")
 
 st.divider()
 
-
-# ==================================================
-# 2. CSV 데이터 불러오기
-# ==================================================
+# =====================================================
+# 2. 데이터 파일 불러오기
+# =====================================================
 @st.cache_data
 def load_temperature_data():
+
     current_folder = Path(__file__).resolve().parent
 
     possible_paths = [
         current_folder / "temperature.csv",
         current_folder.parent / "temperature.csv",
-        current_folder.parent / "temperature (1).csv"
+        current_folder.parent.parent / "temperature.csv"
     ]
 
-    csv_path = None
+    file_path = None
 
     for path in possible_paths:
         if path.exists():
-            csv_path = path
+            file_path = path
             break
 
-    if csv_path is None:
+    if file_path is None:
         raise FileNotFoundError(
             "temperature.csv 파일을 찾을 수 없습니다. "
-            "프로젝트 최상위 폴더에 파일을 넣어 주세요."
+            "GitHub 저장소의 최상위 폴더에 temperature.csv를 넣어 주세요."
         )
 
-    data = None
-    last_error = None
+    # 다양한 인코딩 시도
+    df = None
 
     for encoding in ["cp949", "utf-8-sig", "utf-8", "euc-kr"]:
         try:
-            data = pd.read_csv(csv_path, encoding=encoding)
+            df = pd.read_csv(file_path, encoding=encoding)
             break
-        except Exception as error:
-            last_error = error
+        except UnicodeDecodeError:
+            continue
 
-    if data is None:
-        raise ValueError(
-            f"CSV 파일을 읽을 수 없습니다: {last_error}"
-        )
+    if df is None:
+        raise ValueError("CSV 파일의 인코딩을 읽을 수 없습니다.")
+
+    # 열 이름 공백 및 BOM 제거
+    df.columns = (
+        df.columns.astype(str)
+        .str.replace("\ufeff", "", regex=False)
+        .str.strip()
+    )
 
     required_columns = ["일시", "평균기온(℃)"]
 
     for column in required_columns:
-        if column not in data.columns:
+        if column not in df.columns:
             raise ValueError(
-                f"CSV 파일에 '{column}' 열이 없습니다.\n"
-                f"현재 열 이름: {list(data.columns)}"
+                f"CSV 파일에 '{column}' 열이 없습니다. "
+                f"현재 열 이름: {list(df.columns)}"
             )
 
-    month_map = {
-        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4,
-        "May": 5, "Jun": 6, "Jul": 7, "Aug": 8,
-        "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
-    }
+    # =================================================
+    # 날짜 데이터 정리
+    # =================================================
+    def parse_month_dates(date_series):
 
-    years = []
-    months = []
+        years = []
+        months = []
 
-    century = 1900
-    previous_short_year = None
+        previous_short_year = None
+        century = 1900
 
-    for value in data["일시"].astype(str):
-        value = value.strip()
+        month_map = {
+            "Jan": 1, "Feb": 2, "Mar": 3,
+            "Apr": 4, "May": 5, "Jun": 6,
+            "Jul": 7, "Aug": 8, "Sep": 9,
+            "Oct": 10, "Nov": 11, "Dec": 12
+        }
 
-        match = re.fullmatch(
-            r"([A-Za-z]{3})-(\d{2})",
-            value
-        )
+        for value in date_series:
 
-        if match:
-            month_text = match.group(1).title()
-            short_year = int(match.group(2))
-            month_number = month_map.get(month_text)
+            value = str(value).strip()
 
-            if month_number is None:
-                years.append(np.nan)
-                months.append(np.nan)
+            # Oct-07 형식 처리
+            match = re.match(
+                r"^([A-Za-z]{3})[-/ ](\d{2})$",
+                value
+            )
+
+            if match:
+                month_text = match.group(1).title()
+                short_year = int(match.group(2))
+
+                if month_text not in month_map:
+                    years.append(np.nan)
+                    months.append(np.nan)
+                    continue
+
+                # 99년 다음 00년으로 넘어가는 경우 처리
+                if (
+                    previous_short_year is not None
+                    and short_year < previous_short_year
+                ):
+                    century += 100
+
+                year = century + short_year
+                month = month_map[month_text]
+
+                previous_short_year = short_year
+
+                years.append(year)
+                months.append(month)
                 continue
 
-            # 99년 다음 00년으로 넘어갈 때 세기 변경
-            if (
-                previous_short_year is not None
-                and short_year < previous_short_year
-            ):
-                century += 100
-
-            years.append(century + short_year)
-            months.append(month_number)
-
-            previous_short_year = short_year
-
-        else:
-            # YYYY-MM 또는 YYYY-MM-DD 형식도 처리
-            parsed_date = pd.to_datetime(
+            # YYYY-MM 또는 YYYY-MM-DD 형식 처리
+            parsed = pd.to_datetime(
                 value,
                 errors="coerce"
             )
 
-            if pd.isna(parsed_date):
+            if pd.isna(parsed):
                 years.append(np.nan)
                 months.append(np.nan)
             else:
-                years.append(parsed_date.year)
-                months.append(parsed_date.month)
+                years.append(parsed.year)
+                months.append(parsed.month)
 
-    data["연도"] = years
-    data["월"] = months
+        return years, months
 
-    data["평균기온(℃)"] = pd.to_numeric(
-        data["평균기온(℃)"],
+    years, months = parse_month_dates(df["일시"])
+
+    df["연도"] = years
+    df["월번호"] = months
+
+    # 기온 숫자 변환
+    df["평균기온(℃)"] = pd.to_numeric(
+        df["평균기온(℃)"],
         errors="coerce"
     )
 
-    data = data.dropna(
-        subset=["연도", "월", "평균기온(℃)"]
+    # 결측치 제거
+    df = df.dropna(
+        subset=["연도", "월번호", "평균기온(℃)"]
     ).copy()
 
-    data["연도"] = data["연도"].astype(int)
-    data["월"] = data["월"].astype(int)
+    df["연도"] = df["연도"].astype(int)
+    df["월번호"] = df["월번호"].astype(int)
 
-    data = data[data["월"].between(1, 12)]
-
-    data = data.sort_values(
-        ["연도", "월"]
+    df = df.sort_values(
+        ["연도", "월번호"]
     ).reset_index(drop=True)
 
-    if data.empty:
+    if df.empty:
         raise ValueError("분석할 수 있는 기온 데이터가 없습니다.")
 
-    return data
+    return df
 
 
+# =====================================================
+# 3. 데이터 불러오기 오류 처리
+# =====================================================
 try:
-    df = load_temperature_data()
+    raw_data = load_temperature_data()
 
-except Exception as error:
-    st.error(
-        f"데이터를 불러오는 중 오류가 발생했습니다.\n\n{error}"
-    )
+except Exception as e:
+    st.error("데이터를 불러오는 중 문제가 발생했어요.")
+    st.error(str(e))
     st.stop()
 
 
-# ==================================================
-# 3. 사용자 입력
-# ==================================================
-st.subheader("🔎 예측 조건 선택")
-
+# =====================================================
+# 4. 월 이름 설정
+# =====================================================
 month_names = {
-    1: "1월", 2: "2월", 3: "3월", 4: "4월",
-    5: "5월", 6: "6월", 7: "7월", 8: "8월",
-    9: "9월", 10: "10월", 11: "11월", 12: "12월"
+    1: "1월",
+    2: "2월",
+    3: "3월",
+    4: "4월",
+    5: "5월",
+    6: "6월",
+    7: "7월",
+    8: "8월",
+    9: "9월",
+    10: "10월",
+    11: "11월",
+    12: "12월"
 }
 
-latest_year = int(df["연도"].max())
+
+# =====================================================
+# 5. 사용자 선택
+# =====================================================
+st.subheader("📅 예측할 시기 선택")
 
 col1, col2 = st.columns(2)
 
 with col1:
     selected_month = st.selectbox(
-        "예측할 월",
-        options=list(range(1, 13)),
+        "예측하고 싶은 월을 선택하세요.",
+        list(range(1, 13)),
         format_func=lambda x: month_names[x]
     )
 
+latest_year = int(raw_data["연도"].max())
+
 with col2:
     prediction_year = st.number_input(
-        "예측할 연도",
+        "예측하고 싶은 연도",
         min_value=latest_year + 1,
         max_value=2100,
         value=latest_year + 1,
         step=1
     )
 
-st.info(
-    f"📅 선택 조건: {month_names[selected_month]} "
-    f"/ {int(prediction_year)}년"
-)
+prediction_year = int(prediction_year)
+
+st.divider()
 
 
-# ==================================================
-# 4. 선택한 월의 데이터 추출
-# ==================================================
-month_data = df[
-    df["월"] == selected_month
+# =====================================================
+# 6. 선택한 월의 과거 데이터 추출
+# =====================================================
+monthly_data = raw_data[
+    raw_data["월번호"] == selected_month
 ].copy()
 
-# 같은 연도에 데이터가 여러 개 있으면 평균으로 정리
-month_data = (
-    month_data.groupby("연도", as_index=False)
-    ["평균기온(℃)"].mean()
+monthly_data = (
+    monthly_data
+    .groupby("연도", as_index=False)["평균기온(℃)"]
+    .mean()
 )
 
-month_data = month_data.sort_values("연도")
+monthly_data = monthly_data.sort_values(
+    "연도"
+).reset_index(drop=True)
 
-if len(month_data) < 3:
-    st.error(
-        "선택한 월의 데이터가 너무 적습니다. "
-        "최소 3개 연도의 데이터가 필요합니다."
-    )
+if len(monthly_data) < 3:
+    st.error("선택한 월의 데이터가 3개 연도 이상 있어야 예측할 수 있습니다.")
     st.stop()
 
-x = month_data["연도"].to_numpy(dtype=float)
-y = month_data["평균기온(℃)"].to_numpy(dtype=float)
+x = monthly_data["연도"].to_numpy(dtype=float)
+y = monthly_data["평균기온(℃)"].to_numpy(dtype=float)
 
-if len(np.unique(x)) < 3:
-    st.error("서로 다른 연도가 최소 3개 필요합니다.")
-    st.stop()
+target_x = float(prediction_year)
 
 
-# ==================================================
-# 5. 알고리즘 1: 선형회귀
-# ==================================================
+# =====================================================
+# 7. 선형회귀
+# =====================================================
 def linear_regression(x, y):
+
     x_mean = np.mean(x)
     y_mean = np.mean(y)
 
     denominator = np.sum((x - x_mean) ** 2)
 
     if denominator == 0:
-        raise ValueError("선형회귀 계산에 필요한 데이터가 부족합니다.")
-
-    slope = np.sum(
-        (x - x_mean) * (y - y_mean)
-    ) / denominator
+        slope = 0
+    else:
+        slope = np.sum(
+            (x - x_mean) * (y - y_mean)
+        ) / denominator
 
     intercept = y_mean - slope * x_mean
 
@@ -256,478 +285,403 @@ def linear_regression(x, y):
         new_x = np.asarray(new_x, dtype=float)
         return slope * new_x + intercept
 
-    return predict, slope, intercept
+    return predict
 
 
-# ==================================================
-# 6. 알고리즘 2: 2차 다항회귀
-# ==================================================
+linear_predict = linear_regression(x, y)
+
+
+# =====================================================
+# 8. 다항회귀
+# =====================================================
 def polynomial_regression(x, y):
-    center = np.mean(x)
-    scale = np.std(x)
 
-    if scale == 0:
-        raise ValueError("다항회귀 계산에 필요한 데이터가 부족합니다.")
+    x_mean = np.mean(x)
+    x_std = np.std(x)
 
-    z = (x - center) / scale
+    if x_std == 0:
+        x_std = 1
 
-    features = np.column_stack([
+    z = (x - x_mean) / x_std
+
+    matrix = np.column_stack([
         z ** 2,
         z,
         np.ones(len(z))
     ])
 
     coefficients, _, _, _ = np.linalg.lstsq(
-        features,
+        matrix,
         y,
         rcond=None
     )
 
     def predict(new_x):
-        new_x = np.asarray(new_x, dtype=float)
-        new_z = (new_x - center) / scale
 
-        new_features = np.column_stack([
+        new_x = np.asarray(new_x, dtype=float)
+        new_z = (new_x - x_mean) / x_std
+
+        new_matrix = np.column_stack([
             new_z ** 2,
             new_z,
             np.ones(len(new_z))
         ])
 
-        return new_features @ coefficients
+        return new_matrix @ coefficients
 
-    return predict, coefficients, center, scale
+    return predict
 
 
-# ==================================================
-# 7. 알고리즘 3: 의사결정나무 회귀
-# ==================================================
-def decision_tree_regression(x, y, max_depth=3):
-    min_samples_leaf = max(
-        2,
-        int(np.ceil(len(x) * 0.03))
-    )
+polynomial_predict = polynomial_regression(x, y)
 
-    def build_tree(x_values, y_values, depth):
-        node = {
-            "value": float(np.mean(y_values)),
-            "threshold": None,
-            "left": None,
-            "right": None
+
+# =====================================================
+# 9. 의사결정나무 회귀
+# =====================================================
+def build_decision_tree(x, y, depth=0, max_depth=3, min_leaf=2):
+
+    # 현재 노드의 평균값
+    current_mean = float(np.mean(y))
+
+    # 종료 조건
+    if (
+        depth >= max_depth
+        or len(y) < min_leaf * 2
+        or len(np.unique(x)) < 2
+    ):
+        return {
+            "value": current_mean
         }
 
-        if depth >= max_depth:
-            return node
+    best_error = float("inf")
+    best_split = None
 
-        if len(x_values) < min_samples_leaf * 2:
-            return node
+    sorted_x = np.sort(np.unique(x))
 
-        order = np.argsort(x_values)
-        sorted_x = x_values[order]
-        sorted_y = y_values[order]
+    # 후보 분할 지점
+    split_points = (
+        sorted_x[:-1] + sorted_x[1:]
+    ) / 2
 
-        parent_sse = np.sum(
-            (sorted_y - np.mean(sorted_y)) ** 2
-        )
+    for split in split_points:
 
-        best_sse = parent_sse
-        best_threshold = None
+        left_mask = x <= split
+        right_mask = x > split
 
-        for i in range(
-            min_samples_leaf,
-            len(sorted_x) - min_samples_leaf + 1
+        if (
+            np.sum(left_mask) < min_leaf
+            or np.sum(right_mask) < min_leaf
         ):
-            if sorted_x[i - 1] == sorted_x[i]:
-                continue
+            continue
 
-            left_y = sorted_y[:i]
-            right_y = sorted_y[i:]
+        left_y = y[left_mask]
+        right_y = y[right_mask]
 
-            left_sse = np.sum(
-                (left_y - np.mean(left_y)) ** 2
-            )
-
-            right_sse = np.sum(
-                (right_y - np.mean(right_y)) ** 2
-            )
-
-            total_sse = left_sse + right_sse
-
-            if total_sse < best_sse:
-                best_sse = total_sse
-                best_threshold = (
-                    sorted_x[i - 1] + sorted_x[i]
-                ) / 2
-
-        if best_threshold is None:
-            return node
-
-        left_mask = x_values <= best_threshold
-        right_mask = x_values > best_threshold
-
-        node["threshold"] = float(best_threshold)
-
-        node["left"] = build_tree(
-            x_values[left_mask],
-            y_values[left_mask],
-            depth + 1
+        error = (
+            np.sum((left_y - np.mean(left_y)) ** 2)
+            + np.sum((right_y - np.mean(right_y)) ** 2)
         )
 
-        node["right"] = build_tree(
-            x_values[right_mask],
-            y_values[right_mask],
-            depth + 1
+        if error < best_error:
+            best_error = error
+            best_split = split
+
+    if best_split is None:
+        return {
+            "value": current_mean
+        }
+
+    left_mask = x <= best_split
+    right_mask = x > best_split
+
+    return {
+        "split": float(best_split),
+        "left": build_decision_tree(
+            x[left_mask],
+            y[left_mask],
+            depth + 1,
+            max_depth,
+            min_leaf
+        ),
+        "right": build_decision_tree(
+            x[right_mask],
+            y[right_mask],
+            depth + 1,
+            max_depth,
+            min_leaf
         )
+    }
 
-        return node
 
-    tree = build_tree(x, y, 0)
+def predict_tree(tree, value):
 
-    def predict_one(value, node):
-        if node["threshold"] is None:
-            return node["value"]
+    if "value" in tree:
+        return tree["value"]
 
-        if value <= node["threshold"]:
-            return predict_one(value, node["left"])
+    if value <= tree["split"]:
+        return predict_tree(tree["left"], value)
 
-        return predict_one(value, node["right"])
+    return predict_tree(tree["right"], value)
+
+
+def decision_tree_regression(x, y):
+
+    min_leaf = max(
+        2,
+        math.ceil(len(x) * 0.03)
+    )
+
+    tree = build_decision_tree(
+        x,
+        y,
+        max_depth=3,
+        min_leaf=min_leaf
+    )
 
     def predict(new_x):
+
         new_x = np.asarray(new_x, dtype=float)
 
         return np.array([
-            predict_one(value, tree)
+            predict_tree(tree, value)
             for value in new_x
         ])
 
-    return predict, tree
+    return predict
 
 
-# ==================================================
-# 8. 세 알고리즘 학습
-# ==================================================
-try:
-    linear_predict, linear_slope, linear_intercept = (
-        linear_regression(x, y)
-    )
-
-    poly_predict, poly_coef, poly_center, poly_scale = (
-        polynomial_regression(x, y)
-    )
-
-    tree_predict, tree_model = decision_tree_regression(
-        x,
-        y,
-        max_depth=3
-    )
-
-except Exception as error:
-    st.error(f"회귀 알고리즘 계산 중 오류가 발생했습니다: {error}")
-    st.stop()
+tree_predict = decision_tree_regression(x, y)
 
 
-# ==================================================
-# 9. 알고리즘별 예측값 계산
-# ==================================================
-target_year = float(prediction_year)
-
+# =====================================================
+# 10. 예측값 계산
+# =====================================================
 predictions = {
-    "선형회귀": float(linear_predict([target_year])[0]),
-    "다항회귀": float(poly_predict([target_year])[0]),
-    "의사결정나무 회귀": float(tree_predict([target_year])[0])
-}
-
-fitted_values = {
-    "선형회귀": linear_predict(x),
-    "다항회귀": poly_predict(x),
-    "의사결정나무 회귀": tree_predict(x)
+    "선형회귀": float(linear_predict([target_x])[0]),
+    "다항회귀": float(polynomial_predict([target_x])[0]),
+    "의사결정나무 회귀": float(tree_predict([target_x])[0])
 }
 
 
-# ==================================================
-# 10. 결정계수 R² 계산
-# ==================================================
+# =====================================================
+# 11. 결정계수 R² 계산
+# =====================================================
 def calculate_r2(actual, predicted):
-    ss_total = np.sum(
+
+    actual = np.asarray(actual, dtype=float)
+    predicted = np.asarray(predicted, dtype=float)
+
+    total_error = np.sum(
         (actual - np.mean(actual)) ** 2
     )
 
-    ss_residual = np.sum(
+    residual_error = np.sum(
         (actual - predicted) ** 2
     )
 
-    if ss_total == 0:
+    if total_error == 0:
         return 0.0
 
-    return float(1 - ss_residual / ss_total)
+    return 1 - residual_error / total_error
 
 
-r2_scores = {
-    name: calculate_r2(y, values)
-    for name, values in fitted_values.items()
+fitted_values = {
+    "선형회귀": linear_predict(x),
+    "다항회귀": polynomial_predict(x),
+    "의사결정나무 회귀": tree_predict(x)
+}
+
+r2_values = {
+    name: calculate_r2(y, fitted)
+    for name, fitted in fitted_values.items()
 }
 
 
-# ==================================================
-# 11. 알고리즘 색상 설정
-# ==================================================
-algorithm_names = [
-    "선형회귀",
-    "다항회귀",
-    "의사결정나무 회귀"
-]
+# =====================================================
+# 12. 알고리즘 선택
+# =====================================================
+st.subheader("🧠 예측 알고리즘 선택")
 
-# 요청한 색상: 자주색, 남색, 핑크색
+selected_model = st.selectbox(
+    "어떤 알고리즘으로 예측할까요?",
+    [
+        "선형회귀",
+        "다항회귀",
+        "의사결정나무 회귀"
+    ]
+)
+
+selected_prediction = predictions[selected_model]
+selected_r2 = r2_values[selected_model]
+
+
+# =====================================================
+# 13. 선택 알고리즘 예측 결과
+# =====================================================
+st.subheader("🔮 예측 결과")
+
+result_col1, result_col2 = st.columns(2)
+
+with result_col1:
+    st.metric(
+        label=f"{prediction_year}년 {month_names[selected_month]} 예상 평균기온",
+        value=f"{selected_prediction:.2f}℃"
+    )
+
+with result_col2:
+    st.metric(
+        label="과거 데이터 결정계수 R²",
+        value=f"{selected_r2:.3f}"
+    )
+
+st.caption(
+    "※ R²는 과거 데이터에 모델을 적용했을 때의 설명력을 나타내며, "
+    "미래 예측의 정확도를 보장하지는 않아요."
+)
+
+
+# =====================================================
+# 14. 세 가지 알고리즘 예측값 비교
+# =====================================================
+st.subheader("📊 알고리즘별 예측 결과 비교")
+
+comparison_data = pd.DataFrame({
+    "알고리즘": list(predictions.keys()),
+    "예측 평균기온(℃)": [
+        predictions[name]
+        for name in predictions
+    ],
+    "과거 데이터 R²": [
+        r2_values[name]
+        for name in predictions
+    ]
+})
+
+st.dataframe(
+    comparison_data,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# =====================================================
+# 15. 그래프
+# =====================================================
+st.divider()
+st.subheader("📈 과거 기온과 미래 예측 그래프")
+
 model_colors = {
     "선형회귀": "#800080",
     "다항회귀": "#000080",
     "의사결정나무 회귀": "#FF1493"
 }
 
-
-# ==================================================
-# 12. 알고리즘 선택
-# ==================================================
-st.divider()
-st.subheader("🧠 회귀 알고리즘 선택")
-
-selected_algorithm = st.selectbox(
-    "사용할 예측 알고리즘을 선택해 줘!",
-    options=algorithm_names,
-    index=0
-)
-
-algorithm_descriptions = {
-    "선형회귀": (
-        "과거 기온 변화의 전체적인 방향을 직선으로 나타내는 방법이야."
-    ),
-    "다항회귀": (
-        "기온 변화가 직선이 아니라 곡선 형태로 나타나는 경우를 "
-        "표현할 수 있어. 이번 프로그램에서는 2차 곡선을 사용해."
-    ),
-    "의사결정나무 회귀": (
-        "연도를 여러 구간으로 나누고 각 구간의 평균기온을 "
-        "예측값으로 사용하는 방법이야."
-    )
-}
-
-st.info(
-    f"💡 **{selected_algorithm}**\n\n"
-    f"{algorithm_descriptions[selected_algorithm]}"
-)
-
-
-# ==================================================
-# 13. 예측 결과 표시
-# ==================================================
-st.divider()
-st.subheader("🎯 알고리즘별 예측 결과")
-
-selected_prediction = predictions[selected_algorithm]
-selected_r2 = r2_scores[selected_algorithm]
-
-c1, c2, c3 = st.columns(3)
-
-with c1:
-    st.metric(
-        "선택한 알고리즘",
-        selected_algorithm
-    )
-
-with c2:
-    st.metric(
-        "예측 평균기온",
-        f"{selected_prediction:.2f} ℃"
-    )
-
-with c3:
-    st.metric(
-        "과거 데이터 결정계수 R²",
-        f"{selected_r2:.3f}"
-    )
-
-
-# ==================================================
-# 14. 세 알고리즘 비교표
-# ==================================================
-st.markdown("### 📋 세 가지 알고리즘 비교")
-
-comparison_data = []
-
-for name in algorithm_names:
-    comparison_data.append({
-        "알고리즘": name,
-        "예측 평균기온(℃)": round(predictions[name], 2),
-        "과거 데이터 R²": round(r2_scores[name], 3)
-    })
-
-comparison_df = pd.DataFrame(comparison_data)
-
-st.dataframe(
-    comparison_df,
-    use_container_width=True,
-    hide_index=True
-)
-
-difference = (
-    max(predictions.values()) - min(predictions.values())
-)
-
-st.write(
-    f"📊 세 알고리즘의 예측 기온 차이는 "
-    f"**{difference:.2f}℃**야."
-)
-
-
-# ==================================================
-# 15. 그래프 생성
-# ==================================================
-st.divider()
-st.subheader("📈 과거 기온과 알고리즘별 예측 그래프")
+# 실제 관측 데이터 점 색상: 민트색
+actual_point_color = "#40E0D0"
 
 grid_x = np.linspace(
     float(np.min(x)),
-    target_year,
+    target_x,
     400
 )
 
-model_functions = {
-    "선형회귀": linear_predict,
-    "다항회귀": poly_predict,
-    "의사결정나무 회귀": tree_predict
-}
-
 fig = go.Figure()
 
-# 실제 과거 기온 데이터: 회색 점
+# 실제 관측 데이터
 fig.add_trace(
     go.Scatter(
         x=x,
         y=y,
         mode="markers",
-        name="실제 평균기온",
+        name="실제 관측 기온",
         marker=dict(
-            color="#777777",
-            size=8,
-            opacity=0.75
-        ),
-        hovertemplate=(
-            "%{x:.0f}년<br>"
-            "실제 평균기온: %{y:.2f}℃"
-            "<extra></extra>"
+            color=actual_point_color,
+            size=9,
+            opacity=1,
+            line=dict(
+                color="#168F86",
+                width=1
+            )
         )
     )
 )
 
-# 세 가지 알고리즘의 예측선
-for name in algorithm_names:
-    predicted_line = model_functions[name](grid_x)
+# 세 가지 알고리즘 선
+for model_name, predict_function in [
+    ("선형회귀", linear_predict),
+    ("다항회귀", polynomial_predict),
+    ("의사결정나무 회귀", tree_predict)
+]:
 
-    is_selected = name == selected_algorithm
-
-    # 의사결정나무는 계단형 선으로 표시
-    line_shape = (
-        "hv"
-        if name == "의사결정나무 회귀"
-        else "linear"
-    )
+    line_width = 4 if model_name == selected_model else 2
+    line_opacity = 1 if model_name == selected_model else 0.65
 
     fig.add_trace(
         go.Scatter(
             x=grid_x,
-            y=predicted_line,
+            y=predict_function(grid_x),
             mode="lines",
-            name=name,
+            name=model_name,
             line=dict(
-                color=model_colors[name],
-                width=4 if is_selected else 2.5,
-                dash="solid" if is_selected else "dash",
-                shape=line_shape
+                color=model_colors[model_name],
+                width=line_width,
+                shape=(
+                    "hv"
+                    if model_name == "의사결정나무 회귀"
+                    else "linear"
+                )
             ),
-            opacity=1.0 if is_selected else 0.8,
-            hovertemplate=(
-                "%{x:.0f}년<br>"
-                f"{name}: "
-                "%{y:.2f}℃"
-                "<extra></extra>"
-            )
+            opacity=line_opacity
         )
     )
 
-# 각 알고리즘의 최종 예측 지점
-for name in algorithm_names:
-    is_selected = name == selected_algorithm
-
-    fig.add_trace(
-        go.Scatter(
-            x=[target_year],
-            y=[predictions[name]],
-            mode="markers+text",
-            name=f"{name} 예측값",
-            marker=dict(
-                color=model_colors[name],
-                size=16 if is_selected else 11,
-                symbol="star" if is_selected else "circle"
-            ),
-            text=[
-                f"{predictions[name]:.1f}℃"
-                if is_selected else ""
-            ],
-            textposition="top center",
-            showlegend=False,
-            hovertemplate=(
-                f"{name}<br>"
-                "%{x:.0f}년<br>"
-                "예측: %{y:.2f}℃"
-                "<extra></extra>"
+# 선택된 알고리즘의 미래 예측 지점
+fig.add_trace(
+    go.Scatter(
+        x=[prediction_year],
+        y=[selected_prediction],
+        mode="markers",
+        name="선택한 알고리즘의 예측값",
+        marker=dict(
+            color=model_colors[selected_model],
+            size=16,
+            symbol="star",
+            line=dict(
+                color="white",
+                width=1
             )
         )
     )
-
-fig.add_vline(
-    x=target_year,
-    line_width=1,
-    line_dash="dot",
-    line_color="#999999"
 )
 
 fig.update_layout(
-    title=dict(
-        text=(
-            f"{month_names[selected_month]} 서울 평균기온 "
-            f"알고리즘 비교"
-        ),
-        x=0.5
-    ),
+    title=f"{month_names[selected_month]} 평균기온 변화와 {prediction_year}년 예측",
     xaxis_title="연도",
-    yaxis_title="평균기온 (℃)",
+    yaxis_title="평균기온(℃)",
     template="plotly_white",
-    height=650,
     hovermode="x unified",
+    height=600,
     legend=dict(
         orientation="h",
         yanchor="bottom",
         y=1.02,
-        xanchor="center",
-        x=0.5
+        xanchor="left",
+        x=0
     ),
-    margin=dict(
-        l=30,
-        r=30,
-        t=110,
-        b=50
+    xaxis=dict(
+        tickformat="d",
+        showgrid=True
+    ),
+    yaxis=dict(
+        showgrid=True
     )
 )
 
-fig.update_xaxes(
-    showgrid=True,
-    gridcolor="lightgray",
-    tickformat="d"
-)
-
-fig.update_yaxes(
-    showgrid=True,
-    gridcolor="lightgray",
-    ticksuffix="℃"
+fig.add_vline(
+    x=prediction_year,
+    line_dash="dash",
+    line_color="#777777",
+    annotation_text="예측 연도"
 )
 
 st.plotly_chart(
@@ -736,164 +690,102 @@ st.plotly_chart(
 )
 
 
-# ==================================================
-# 16. 그래프 범례 설명
-# ==================================================
-st.markdown("### 🧭 그래프 보는 방법")
+# =====================================================
+# 16. 그래프 색상 설명
+# =====================================================
+st.markdown("### 🎨 그래프 색상 안내")
 
-st.markdown(
-    """
-    - ⚫ **회색 점:** CSV에 기록된 실제 과거 평균기온
-    - 🟣 **자주색 선:** 선형회귀 예측 추세
-    - 🔵 **남색 선:** 다항회귀 예측 추세
-    - 💗 **핑크색 선:** 의사결정나무 회귀 예측 추세
-    - ⭐ **별 모양:** 선택한 알고리즘의 최종 예측 기온
+color_col1, color_col2, color_col3, color_col4 = st.columns(4)
 
-    선택한 알고리즘은 그래프에서 더 굵은 선으로 표시돼.
-    """
-)
+with color_col1:
+    st.markdown("🟢 **민트색 점**")
+    st.caption("실제 관측된 기온")
+
+with color_col2:
+    st.markdown("🟣 **보라색 선**")
+    st.caption("선형회귀")
+
+with color_col3:
+    st.markdown("🔵 **남색 선**")
+    st.caption("다항회귀")
+
+with color_col4:
+    st.markdown("💗 **핑크색 선**")
+    st.caption("의사결정나무 회귀")
 
 
-# ==================================================
+# =====================================================
 # 17. 알고리즘 설명
-# ==================================================
+# =====================================================
 st.divider()
-st.subheader("📚 세 가지 회귀 알고리즘 알아보기")
+st.subheader("📚 예측 알고리즘 알아보기")
 
-with st.expander("1️⃣ 선형회귀 (Linear Regression)", expanded=True):
-    st.markdown(
-        """
-        과거 데이터의 전체적인 변화 방향을 하나의 직선으로 표현해.
+with st.expander("1️⃣ 선형회귀란?"):
 
-        1. 과거 연도와 평균기온을 점으로 표시해.
-        2. 실제 점들과 직선 사이의 오차 제곱합이 작아지는 직선을 찾아.
-        3. 입력한 연도를 직선에 대입해 예측 기온을 계산해.
+    st.write("""
+    선형회귀는 과거 기온 데이터의 전체적인 증가 또는 감소 흐름을
+    직선으로 나타내는 방법이에요.
 
-        **특징:** 전체적인 상승 또는 하락 추세를 파악하기 좋아.
-        """
-    )
+    - 과거 데이터의 평균적인 변화 추세를 분석해요.
+    - 계산이 간단하고 결과를 이해하기 쉬워요.
+    - 장기적인 변화 방향을 살펴보는 데 활용할 수 있어요.
+    """)
 
-    st.latex(r"\hat{y}=ax+b")
+with st.expander("2️⃣ 다항회귀란?"):
 
-    st.write(
-        f"이번 선택 조건의 기울기: {linear_slope:.5f}"
-    )
+    st.write("""
+    다항회귀는 직선뿐만 아니라 곡선 형태로 데이터의 흐름을 표현해요.
 
+    - 기온의 굴곡진 변화 패턴을 반영할 수 있어요.
+    - 여기서는 2차 다항식을 사용했어요.
+    - 과거 데이터에 지나치게 맞춰질 가능성도 있어요.
+    """)
 
-with st.expander("2️⃣ 다항회귀 (Polynomial Regression)"):
-    st.markdown(
-        """
-        다항회귀는 직선이 아닌 곡선 형태로 데이터의 관계를 표현해.
+with st.expander("3️⃣ 의사결정나무 회귀란?"):
 
-        이번 프로그램에서는 2차 다항회귀를 사용했어.
+    st.write("""
+    의사결정나무 회귀는 데이터를 여러 구간으로 나누고
+    각 구간의 평균값을 이용해 예측하는 방법이에요.
 
-        1. 연도 데이터를 표준화해.
-        2. 연도의 제곱 항을 추가해.
-        3. 과거 기온의 곡선 형태를 계산해.
-        4. 입력한 연도의 기온을 예측해.
-
-        **특징:** 기온 변화가 직선 형태가 아닐 때 곡선으로 추세를 표현할 수 있어.
-        """
-    )
-
-    st.latex(r"\hat{y}=az^2+bz+c")
-
-    st.write(
-        "z는 계산하기 쉽도록 표준화한 연도야."
-    )
+    - 데이터의 구간별 특징을 반영해요.
+    - 직선이나 곡선이 아닌 계단 형태의 결과가 나올 수 있어요.
+    - 미래 연도가 과거 데이터의 범위를 벗어나면
+      마지막 구간의 평균값이 유지될 수 있어요.
+    """)
 
 
-with st.expander("3️⃣ 의사결정나무 회귀 (Decision Tree Regression)"):
-    st.markdown(
-        """
-        의사결정나무 회귀는 데이터를 여러 구간으로 나누고
-        각 구간의 평균값을 예측하는 알고리즘이야.
-
-        1. 연도 데이터를 여러 구간으로 나눌 기준을 찾아.
-        2. 각 구간의 기온이 서로 비슷하도록 분할해.
-        3. 새로운 연도가 속한 구간의 평균기온을 예측값으로 사용해.
-
-        **특징:** 직선이나 곡선이 아닌 계단 형태의 예측선을 만들 수 있어.
-
-        미래 연도가 과거의 마지막 구간에 속하면 그 구간의 평균값을
-        예측한다는 점도 기억해 줘.
-        """
-    )
-
-
-# ==================================================
-# 18. 계산 결과 확인
-# ==================================================
-with st.expander("🧮 알고리즘 계산 결과 자세히 보기"):
-    st.write("**선형회귀 계산식**")
-
-    st.code(
-        f"y = {linear_slope:.6f} × 연도 "
-        f"+ ({linear_intercept:.6f})",
-        language="text"
-    )
-
-    st.write("**다항회귀 계산 계수**")
-
-    st.code(
-        f"2차 계수: {poly_coef[0]:.6f}\n"
-        f"1차 계수: {poly_coef[1]:.6f}\n"
-        f"상수항: {poly_coef[2]:.6f}",
-        language="text"
-    )
-
-    st.write("**의사결정나무 회귀 설정**")
-
-    st.write(
-        "- 최대 깊이: 3\n"
-        f"- 최소 잎 노드 데이터 수: "
-        f"{max(2, int(np.ceil(len(x) * 0.03)))}개"
-    )
-
-
-# ==================================================
-# 19. 알고리즘 비교 시 주의점
-# ==================================================
+# =====================================================
+# 18. 데이터 확인
+# =====================================================
 st.divider()
-st.subheader("💡 알고리즘을 비교할 때 알아둘 점")
 
-st.markdown(
-    """
-    **결정계수 R²**는 각 알고리즘이 과거 데이터의 변화를
-    얼마나 설명하는지 보여주는 지표야.
+with st.expander("🗂️ 원본 기온 데이터 확인하기"):
 
-    - 1에 가까우면 과거 데이터의 설명력이 높은 편이야.
-    - 0에 가까우면 직선이나 곡선이 과거 데이터의 변화를 잘 설명하지 못해.
-    - 음수가 나올 수도 있어.
+    display_data = raw_data.copy()
 
-    하지만 R²가 가장 높은 알고리즘이 미래 기온도 반드시
-    가장 정확하게 예측한다는 뜻은 아니야.
-
-    특히 다항회귀는 먼 미래로 갈수록 곡선이 크게 휘어질 수 있고,
-    의사결정나무는 과거 마지막 구간의 평균값을 유지하는 경향이 있어.
-
-    세 알고리즘의 예측값이 왜 다른지 그래프와 함께 비교해 보는 것이 중요해!
-    """
-)
-
-
-# ==================================================
-# 20. 실제 데이터 확인
-# ==================================================
-with st.expander("📋 선택한 월의 과거 데이터 확인하기"):
-    display_data = month_data.copy()
-
-    display_data["월"] = display_data["월"].map(
-        month_names
+    # ★ 중요: '월' 열을 먼저 확실하게 생성
+    # 기존 오류처럼 없는 열을 불러오지 않도록 수정했어요.
+    display_data["월번호"] = pd.to_numeric(
+        display_data["월번호"],
+        errors="coerce"
     )
 
-    display_data = display_data.rename(
-        columns={
-            "연도": "연도",
-            "월": "월",
-            "평균기온(℃)": "평균기온 (℃)"
-        }
+    display_data["월"] = (
+        display_data["월번호"]
+        .map(month_names)
+        .fillna("월 정보 없음")
     )
+
+    display_data["연도"] = display_data["연도"].astype(int)
+
+    # 화면에 보여줄 열을 새로 구성
+    display_data = display_data[
+        ["연도", "월", "평균기온(℃)"]
+    ].copy()
+
+    display_data = display_data.sort_values(
+        ["연도", "월"]
+    ).reset_index(drop=True)
 
     st.dataframe(
         display_data,
@@ -901,7 +793,20 @@ with st.expander("📋 선택한 월의 과거 데이터 확인하기"):
         hide_index=True
     )
 
-st.caption(
-    "자료: temperature.csv | "
-    "알고리즘: 선형회귀, 2차 다항회귀, 의사결정나무 회귀"
-)
+    st.caption(
+        f"총 {len(display_data):,}개의 월별 기온 데이터가 있어요."
+    )
+
+
+# =====================================================
+# 19. 마무리 안내
+# =====================================================
+st.divider()
+
+st.info("""
+💡 **알아두기!**
+
+기온은 장기적인 기후 변화뿐 아니라 자연적인 변동에도 영향을 받아요.
+따라서 이 앱의 결과는 과거 데이터에 기반한 통계적 예측이며,
+실제 미래 기온과 차이가 날 수 있어요.
+""")
