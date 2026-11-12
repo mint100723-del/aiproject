@@ -47,7 +47,7 @@ def load_temperature_data():
     if csv_path is None:
         raise FileNotFoundError(
             "temperature.csv 파일을 찾을 수 없습니다. "
-            "프로젝트 최상위 폴더에 CSV 파일을 넣어 주세요."
+            "프로젝트 최상위 폴더에 파일을 넣어 주세요."
         )
 
     data = None
@@ -211,7 +211,7 @@ month_data = df[
     df["월"] == selected_month
 ].copy()
 
-# 같은 연도에 여러 데이터가 있으면 평균으로 정리
+# 같은 연도에 데이터가 여러 개 있으면 평균으로 정리
 month_data = (
     month_data.groupby("연도", as_index=False)
     ["평균기온(℃)"].mean()
@@ -476,15 +476,12 @@ algorithm_names = [
     "의사결정나무 회귀"
 ]
 
-# 회귀선 색상
+# 요청한 색상: 자주색, 남색, 핑크색
 model_colors = {
-    "선형회귀": "#800080",             # 자주색
-    "다항회귀": "#000080",             # 남색
-    "의사결정나무 회귀": "#FF1493"     # 핑크색
+    "선형회귀": "#800080",
+    "다항회귀": "#000080",
+    "의사결정나무 회귀": "#FF1493"
 }
-
-# 실제 데이터 점 색상
-actual_point_color = "#40E0D0"         # 민트색
 
 
 # ==================================================
@@ -601,7 +598,7 @@ model_functions = {
 
 fig = go.Figure()
 
-# 실제 과거 기온 데이터: 민트색 점
+# 실제 과거 기온 데이터: 회색 점
 fig.add_trace(
     go.Scatter(
         x=x,
@@ -609,13 +606,9 @@ fig.add_trace(
         mode="markers",
         name="실제 평균기온",
         marker=dict(
-            color=actual_point_color,
-            size=9,
-            opacity=1,
-            line=dict(
-                color="#168F86",
-                width=1
-            )
+            color="#777777",
+            size=8,
+            opacity=0.75
         ),
         hovertemplate=(
             "%{x:.0f}년<br>"
@@ -631,6 +624,7 @@ for name in algorithm_names:
 
     is_selected = name == selected_algorithm
 
+    # 의사결정나무는 계단형 선으로 표시
     line_shape = (
         "hv"
         if name == "의사결정나무 회귀"
@@ -749,7 +743,7 @@ st.markdown("### 🧭 그래프 보는 방법")
 
 st.markdown(
     """
-    - 🟢 **민트색 점:** CSV에 기록된 실제 과거 평균기온
+    - ⚫ **회색 점:** CSV에 기록된 실제 과거 평균기온
     - 🟣 **자주색 선:** 선형회귀 예측 추세
     - 🔵 **남색 선:** 다항회귀 예측 추세
     - 💗 **핑크색 선:** 의사결정나무 회귀 예측 추세
@@ -869,7 +863,7 @@ st.markdown(
     얼마나 설명하는지 보여주는 지표야.
 
     - 1에 가까우면 과거 데이터의 설명력이 높은 편이야.
-    - 0에 가까우면 과거 데이터의 변화를 잘 설명하지 못하는 편이야.
+    - 0에 가까우면 직선이나 곡선이 과거 데이터의 변화를 잘 설명하지 못해.
     - 음수가 나올 수도 있어.
 
     하지만 R²가 가장 높은 알고리즘이 미래 기온도 반드시
@@ -906,7 +900,6 @@ with st.expander("📋 선택한 월의 과거 데이터 확인하기"):
         use_container_width=True,
         hide_index=True
     )
-
 
 st.caption(
     "자료: temperature.csv | "
