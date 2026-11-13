@@ -9,48 +9,41 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 
-# =========================================
+# ==========================================
 # 1. 페이지 설정
-# =========================================
+# ==========================================
 st.set_page_config(
-    page_title="붓꽃 품종 AI 예측",
+    page_title="붓꽃 AI 품종 예측",
     page_icon="🌸",
     layout="wide"
 )
 
-st.title("🌸 붓꽃 품종 AI 예측 프로그램")
-st.write(
-    "꽃잎 길이와 꽃잎 너비를 입력하면 "
-    "AI가 붓꽃의 품종을 예측해 줘!"
-)
+st.title("🌸 붓꽃 AI 품종 예측 프로그램")
+st.write("꽃잎 길이와 너비를 입력하면 AI가 품종을 예측해 줘!")
 
 st.divider()
 
-# =========================================
+# ==========================================
 # 2. 데이터 불러오기
-# =========================================
+# ==========================================
 @st.cache_data
 def load_data():
 
-    required_columns = [
-        "꽃잎 길이",
-        "꽃잎 너비",
-        "품종"
-    ]
-
+    required = ["꽃잎 길이", "꽃잎 너비", "품종"]
     df = None
 
     for encoding in ["cp949", "utf-8-sig", "utf-8"]:
+
         try:
             temp = pd.read_csv(
                 "Iris11.csv",
                 encoding=encoding
             )
 
-            if all(
-                col in temp.columns
-                for col in required_columns
-            ):
+            # 컬럼명 앞뒤 공백 제거
+            temp.columns = temp.columns.astype(str).str.strip()
+
+            if all(col in temp.columns for col in required):
                 df = temp
                 break
 
@@ -59,20 +52,18 @@ def load_data():
 
     if df is None:
         raise ValueError(
-            "CSV 파일을 읽지 못했어. "
+            "Iris11.csv 파일을 읽을 수 없어. "
             "파일 이름과 컬럼명을 확인해 줘."
         )
 
-    df = df[required_columns].copy()
+    df = df[required].copy()
 
     df["꽃잎 길이"] = pd.to_numeric(
-        df["꽃잎 길이"],
-        errors="coerce"
+        df["꽃잎 길이"], errors="coerce"
     )
 
     df["꽃잎 너비"] = pd.to_numeric(
-        df["꽃잎 너비"],
-        errors="coerce"
+        df["꽃잎 너비"], errors="coerce"
     )
 
     df["품종"] = df["품종"].astype("string").str.strip()
@@ -92,28 +83,34 @@ try:
     df = load_data()
 
 except Exception as e:
-    st.error(f"데이터 오류: {e}")
+    st.error(f"데이터 불러오기 오류: {e}")
     st.stop()
 
+# ==========================================
+# 3. 색상 설정
+# ==========================================
 
-# =========================================
-# 3. 품종별 색상 설정
-# =========================================
+# 기존 붓꽃 품종 색상
 species_colors = {
-    "Iris-setosa": "#F4A6C1",       # 연핑크
-    "Iris-versicolor": "#8FA8D8",   # 연남색
-    "Iris-virginica": "#9575CD"     # 조금 진한 연보라
+    "Iris-setosa": "#F4A6C1",
+    "Iris-versicolor": "#8FA8D8",
+    "Iris-virginica": "#9575CD"
 }
 
-# 데이터에 다른 품종명이 있을 때 사용할 색상
+# 품종 한글 이름
+korean_names = {
+    "Iris-setosa": "세토사",
+    "Iris-versicolor": "버시컬러",
+    "Iris-virginica": "버지니카"
+}
+
+species_list = sorted(df["품종"].unique())
+
 extra_colors = [
     "#F4A6C1",
     "#8FA8D8",
-    "#9575CD",
-    "#B39DDB"
+    "#9575CD"
 ]
-
-species_list = sorted(df["품종"].unique())
 
 colors = {}
 
@@ -123,22 +120,25 @@ for i, species in enumerate(species_list):
         extra_colors[i % len(extra_colors)]
     )
 
-korean_names = {
-    "Iris-setosa": "세토사",
-    "Iris-versicolor": "버시컬러",
-    "Iris-virginica": "버지니카"
-}
+# 사용자 입력 별 색상: 크리스마스 골드
+INPUT_COLOR = "#F4C542"
 
-# =========================================
-# 4. 입력 범위 안내
-# =========================================
+# 최근접 이웃 원 색상: 민트
+NEIGHBOR_COLOR = "#40E0D0"
+
+# ==========================================
+# 4. 입력 범위 계산
+# ==========================================
 length_min = float(df["꽃잎 길이"].min())
 length_max = float(df["꽃잎 길이"].max())
 
 width_min = float(df["꽃잎 너비"].min())
 width_max = float(df["꽃잎 너비"].max())
 
-st.subheader("📏 꽃잎 입력 범위")
+# ==========================================
+# 5. 입력 범위 안내
+# ==========================================
+st.subheader("📏 꽃잎 측정값 입력 범위")
 
 col1, col2, col3 = st.columns(3)
 
@@ -158,19 +158,20 @@ col3.metric(
 )
 
 st.info(
-    "위 범위는 Iris11.csv에 저장된 실제 데이터의 "
-    "최솟값과 최댓값이야. 범위 안에서 입력해 줘!"
+    "위 범위는 CSV 파일의 실제 최솟값과 최댓값이야. "
+    "범위 안에서 입력해 줘!"
 )
 
 st.divider()
 
-# =========================================
-# 5. KNN 모델 학습
-# =========================================
+# ==========================================
+# 6. KNN 모델 학습
+# ==========================================
+
 X = df[["꽃잎 길이", "꽃잎 너비"]]
 y = df["품종"]
 
-# 표준화 + KNN
+# 표준화 + 최근접 이웃 5개
 model = Pipeline([
     ("scaler", StandardScaler()),
     ("knn", KNeighborsClassifier(n_neighbors=5))
@@ -178,9 +179,9 @@ model = Pipeline([
 
 model.fit(X, y)
 
-# =========================================
-# 6. 사용자 입력
-# =========================================
+# ==========================================
+# 7. 사용자 입력
+# ==========================================
 st.subheader("✏️ 꽃잎 크기 입력하기")
 
 default_length = round(
@@ -197,7 +198,7 @@ with st.form("iris_form"):
 
     with col1:
         petal_length = st.number_input(
-            "꽃잎 길이 (cm)",
+            "🌸 꽃잎 길이 (cm)",
             min_value=length_min,
             max_value=length_max,
             value=default_length,
@@ -207,7 +208,7 @@ with st.form("iris_form"):
 
     with col2:
         petal_width = st.number_input(
-            "꽃잎 너비 (cm)",
+            "🌸 꽃잎 너비 (cm)",
             min_value=width_min,
             max_value=width_max,
             value=default_width,
@@ -216,13 +217,13 @@ with st.form("iris_form"):
         )
 
     submitted = st.form_submit_button(
-        "🔍 붓꽃 품종 예측하기",
+        "🔍 AI 품종 예측하기",
         use_container_width=True
     )
 
-# =========================================
-# 7. 예측 및 결과 출력
-# =========================================
+# ==========================================
+# 8. 예측 실행
+# ==========================================
 if submitted:
 
     input_data = pd.DataFrame({
@@ -230,16 +231,14 @@ if submitted:
         "꽃잎 너비": [petal_width]
     })
 
+    # 품종 예측
     prediction = model.predict(input_data)[0]
 
     # 최근접 이웃 5개 찾기
     scaler = model.named_steps["scaler"]
-    knn = model.named_steps["knn"]
 
-    input_scaled = scaler.transform(input_data)
-
-    distances, indices = knn.kneighbors(
-        input_scaled,
+    distances, indices = model.named_steps["knn"].kneighbors(
+        scaler.transform(input_data),
         n_neighbors=5
     )
 
@@ -249,30 +248,34 @@ if submitted:
     votes = nearest["품종"].value_counts()
 
     result_name = korean_names.get(
-        prediction,
-        prediction
+        prediction, prediction
     )
 
     st.divider()
 
+    # ======================================
+    # 9. 예측 결과
+    # ======================================
     st.subheader("🏆 AI 예측 결과")
+
+    st.success("품종 예측이 완료되었어!")
 
     st.markdown(
         f"""
         <div style="
-            background-color:#E8F5E9;
-            border:2px solid #66BB6A;
+            background-color:#FFF8E1;
+            border:2px solid #F4C542;
             border-radius:18px;
             padding:25px;
             text-align:center;
         ">
-            <h2 style="color:#2E7D32;">
+            <h2 style="color:#9A7200;">
                 🌸 예측된 붓꽃 품종
             </h2>
-            <h1 style="color:#1B5E20;">
+            <h1 style="color:#805F00;">
                 {result_name}
             </h1>
-            <p style="color:#388E3C;font-size:18px;">
+            <p style="color:#9A7200;">
                 {prediction}
             </p>
         </div>
@@ -282,32 +285,30 @@ if submitted:
 
     st.write("")
 
-    # 입력값 확인
-    col1, col2 = st.columns(2)
+    c1, c2 = st.columns(2)
 
-    col1.metric(
+    c1.metric(
         "입력한 꽃잎 길이",
         f"{petal_length:.1f} cm"
     )
 
-    col2.metric(
+    c2.metric(
         "입력한 꽃잎 너비",
         f"{petal_width:.1f} cm"
     )
 
     st.divider()
 
-    # =====================================
-    # 8. 그래프 시각화
-    # =====================================
+    # ======================================
+    # 10. 그래프 시각화
+    # ======================================
     st.subheader("📊 붓꽃 품종 분류 그래프")
 
     st.write(
         "가로축은 꽃잎 길이, 세로축은 꽃잎 너비야. "
-        "초록색 별은 네가 입력한 값이야!"
+        "크리스마스 골드 별이 네가 입력한 값이야!"
     )
 
-    # 그래프 범위
     x_range = length_max - length_min
     y_range = width_max - width_min
 
@@ -326,17 +327,14 @@ if submitted:
         200
     )
 
-    xx, yy = np.meshgrid(
-        x_values,
-        y_values
-    )
+    xx, yy = np.meshgrid(x_values, y_values)
 
     grid_data = pd.DataFrame({
         "꽃잎 길이": xx.ravel(),
         "꽃잎 너비": yy.ravel()
     })
 
-    # 각 위치의 품종 예측
+    # 그래프 배경의 품종 분류
     grid_prediction = model.predict(grid_data)
 
     class_to_num = {
@@ -351,10 +349,8 @@ if submitted:
 
     fig, ax = plt.subplots(figsize=(12, 7))
 
-    # 품종별 배경색
     background_cmap = ListedColormap([
-        colors[species]
-        for species in species_list
+        colors[species] for species in species_list
     ])
 
     ax.contourf(
@@ -366,7 +362,7 @@ if submitted:
         alpha=0.20
     )
 
-    # 기존 학습 데이터: 별 모양
+    # 기존 데이터: 품종별 별
     for species in species_list:
 
         subset = df[df["품종"] == species]
@@ -384,50 +380,50 @@ if submitted:
             zorder=3
         )
 
-    # 최근접 데이터 5개: 민트색 원
+    # 최근접 이웃 5개: 민트색 원
     ax.scatter(
         nearest["꽃잎 길이"],
         nearest["꽃잎 너비"],
         marker="o",
         s=260,
         facecolors="none",
-        edgecolors="#40E0D0",
+        edgecolors=NEIGHBOR_COLOR,
         linewidths=3,
-        label="Nearest 5 (Mint Circle)",
+        label="Nearest 5 Neighbors",
         zorder=6
     )
 
-    # 사용자가 입력한 값: 초록색 별
+    # ======================================
+    # 사용자 입력값: 크리스마스 골드 별
+    # ======================================
     ax.scatter(
         petal_length,
         petal_width,
         marker="*",
-        s=500,
-        color="#00C853",
-        edgecolors="#145A32",
-        linewidths=1.5,
-        label="Your Input (Green Star)",
+        s=550,
+        color=INPUT_COLOR,
+        edgecolors="#A87900",
+        linewidths=1.8,
+        label="Your Input",
         zorder=10
     )
 
-    # 사용자 입력값 설명 표시
     ax.annotate(
-        "YOUR INPUT",
+        "YOUR INPUT ★",
         xy=(petal_length, petal_width),
-        xytext=(12, 15),
+        xytext=(13, 15),
         textcoords="offset points",
         fontsize=10,
         fontweight="bold",
-        color="#16803C",
+        color="#805F00",
         bbox=dict(
-            boxstyle="round,pad=0.3",
-            fc="white",
-            ec="#00C853",
-            alpha=0.9
+            boxstyle="round,pad=0.4",
+            fc="#FFF8E1",
+            ec=INPUT_COLOR,
+            alpha=0.95
         )
     )
 
-    # 축 제목
     ax.set_xlabel(
         "Petal Length (cm)",
         fontsize=13,
@@ -441,7 +437,7 @@ if submitted:
     )
 
     ax.set_title(
-        "Iris Species Classification (KNN)",
+        "Iris Species Classification - KNN",
         fontsize=16,
         fontweight="bold"
     )
@@ -470,19 +466,17 @@ if submitted:
 
     plt.close(fig)
 
-    # =====================================
-    # 9. 분류 이유 설명
-    # =====================================
+    # ======================================
+    # 11. 분류 이유
+    # ======================================
     st.divider()
 
     st.subheader("🔎 왜 이 품종으로 분류되었을까?")
 
     st.write(
-        "AI는 입력한 꽃잎 크기와 기존 데이터의 거리를 "
-        "비교해서 가장 가까운 5개를 선택했어."
+        "AI가 입력한 값과 가장 가까운 데이터 5개를 "
+        "비교해서 투표를 진행했어."
     )
-
-    st.write("**가까운 이웃 5개의 품종별 투표 결과**")
 
     vote_cols = st.columns(len(species_list))
 
@@ -500,14 +494,14 @@ if submitted:
     winner_count = int(votes.get(prediction, 0))
 
     st.success(
-        f"🌸 가장 가까운 데이터 5개 중 "
-        f"{winner_count}개가 {result_name}이기 때문에 "
-        f"{result_name}으로 예측했어!"
+        f"가장 가까운 데이터 5개 중 "
+        f"{winner_count}개가 {result_name}이므로 "
+        f"이 품종으로 예측했어!"
     )
 
-    # =====================================
-    # 10. 가까운 데이터 상세 표
-    # =====================================
+    # ======================================
+    # 12. 최근접 데이터 표
+    # ======================================
     st.subheader("📋 가장 가까운 데이터 5개")
 
     result_table = nearest[
@@ -524,7 +518,6 @@ if submitted:
         columns={
             "꽃잎 길이": "꽃잎 길이(cm)",
             "꽃잎 너비": "꽃잎 너비(cm)",
-            "품종": "품종",
             "거리": "표준화 거리"
         }
     )
@@ -539,53 +532,58 @@ if submitted:
         "※ 표준화 거리가 작을수록 입력값과 가까운 데이터야."
     )
 
+    # ======================================
+    # 13. 색상 안내
+    # ======================================
     st.divider()
 
     st.subheader("🎨 그래프 색상 안내")
 
-    legend_col1, legend_col2 = st.columns(2)
+    st.markdown(
+        f"""
+        <div style="
+            background-color:#FAFAFA;
+            padding:18px;
+            border-radius:12px;
+            line-height:2.2;
+        ">
+            <span style="color:#F4C542;font-size:25px;">★</span>
+            <b>골드 옐로우</b> : 사용자 입력값<br>
 
-    with legend_col1:
-        st.markdown(
-            '<span style="color:#F4A6C1;">★</span> '
-            '연핑크: Setosa<br>'
-            '<span style="color:#8FA8D8;">★</span> '
-            '연남색: Versicolor<br>'
-            '<span style="color:#9575CD;">★</span> '
-            '연보라: Virginica',
-            unsafe_allow_html=True
-        )
+            <span style="color:#F4A6C1;font-size:25px;">★</span>
+            <b>연핑크</b> : Setosa<br>
 
-    with legend_col2:
-        st.markdown(
-            '<span style="color:#00C853;">★</span> '
-            '초록색: 사용자 입력값<br>'
-            '<span style="color:#40E0D0;">◯</span> '
-            '민트색: 가까운 데이터 5개',
-            unsafe_allow_html=True
-        )
+            <span style="color:#8FA8D8;font-size:25px;">★</span>
+            <b>연남색</b> : Versicolor<br>
 
+            <span style="color:#9575CD;font-size:25px;">★</span>
+            <b>연보라</b> : Virginica<br>
 
-# =========================================
-# 11. 하단 설명
-# =========================================
+            <span style="color:#40E0D0;font-size:25px;">◯</span>
+            <b>민트색 원</b> : 최근접 이웃 5개
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+# ==========================================
+# 14. 알고리즘 안내
+# ==========================================
 st.divider()
 
 st.subheader("🌱 KNN 알고리즘이란?")
 
 st.write("""
-KNN은 가장 가까운 이웃의 데이터를 이용해
+KNN은 가까운 이웃의 데이터를 이용해서
 새로운 데이터의 품종을 예측하는 머신러닝 알고리즘이야.
 
-① 기존 붓꽃 데이터를 준비해.
+1. 기존 붓꽃 데이터를 학습해.
+2. 꽃잎 길이와 너비를 표준화해.
+3. 입력값과 기존 데이터의 거리를 계산해.
+4. 가장 가까운 5개 데이터를 찾아.
+5. 가장 많이 등장한 품종으로 예측해!
 
-② 꽃잎 길이와 너비를 표준화해.
-
-③ 입력한 값과 기존 데이터의 거리를 계산해.
-
-④ 가장 가까운 데이터 5개를 찾아.
-
-⑤ 가장 많이 등장한 품종을 최종 예측해!
+이 프로그램은 꽃잎 길이와 너비 두 가지 변수를 사용해.
 """)
 
 st.caption("🌸 Iris AI Classification Project")
